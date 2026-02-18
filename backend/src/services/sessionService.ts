@@ -170,7 +170,9 @@ class SessionService {
         role: row.role,
         content: row.content,
         timestamp: row.created_at,
-        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+        metadata: row.metadata
+          ? (typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata)
+          : undefined,
       };
     } catch (error) {
       logger.error('Failed to add message', { error: String(error), sessionId });
@@ -193,7 +195,9 @@ class SessionService {
         role: row.role,
         content: row.content,
         timestamp: row.created_at,
-        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+        metadata: row.metadata
+          ? (typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata)
+          : undefined,
       }));
     } catch (error) {
       logger.error('Failed to get session messages', { error: String(error), sessionId });
