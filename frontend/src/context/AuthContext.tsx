@@ -51,6 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                         localStorage.removeItem('lr_access_token')
                         localStorage.removeItem('lr_refresh_token')
                         localStorage.removeItem('lr_user')
+                        localStorage.removeItem('lr_token_time')
                         setAccessToken(null)
                         setUser(null)
                     }
@@ -58,6 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     localStorage.removeItem('lr_access_token')
                     localStorage.removeItem('lr_refresh_token')
                     localStorage.removeItem('lr_user')
+                    localStorage.removeItem('lr_token_time')
                 }
             }
             setIsLoading(false)
@@ -65,6 +67,70 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         checkSession()
     }, [])
+
+    // Proactive token refresh — refresh every 12 minutes to avoid expiry
+    useEffect(() => {
+        if (!accessToken) return
+
+        const REFRESH_INTERVAL = 12 * 60 * 1000 // 12 minutes
+
+        const refreshToken = async () => {
+            try {
+                const currentToken = localStorage.getItem('lr_access_token')
+                if (!currentToken) return
+
+                console.log('[Auth] Proactively refreshing token...')
+                const response = await fetch(
+                    `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/auth/refresh-token`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ accessToken: currentToken }),
+                    }
+                )
+
+                if (!response.ok) {
+                    console.warn('[Auth] Proactive refresh failed, token may have expired')
+                    return
+                }
+
+                const data = await response.json()
+                const newToken = data.data?.accessToken
+                const newRefresh = data.data?.refreshToken
+
+                if (newToken) {
+                    localStorage.setItem('lr_access_token', newToken)
+                    localStorage.setItem('lr_token_time', Date.now().toString())
+                    if (newRefresh) {
+                        localStorage.setItem('lr_refresh_token', newRefresh)
+                    }
+                    setAccessToken(newToken)
+                    console.log('[Auth] Token proactively refreshed')
+                }
+            } catch (err) {
+                console.warn('[Auth] Proactive token refresh error:', err)
+            }
+        }
+
+        // Check if token is old enough to need a refresh right now
+        const tokenTime = localStorage.getItem('lr_token_time')
+        const elapsed = tokenTime ? Date.now() - parseInt(tokenTime, 10) : REFRESH_INTERVAL
+        const initialDelay = Math.max(0, REFRESH_INTERVAL - elapsed)
+
+        // First refresh after remaining time, then every 12 minutes
+        const initialTimeout = setTimeout(() => {
+            refreshToken()
+            // Then set up the recurring interval
+            intervalRef = setInterval(refreshToken, REFRESH_INTERVAL)
+        }, initialDelay)
+
+        let intervalRef: NodeJS.Timeout | undefined
+
+        return () => {
+            clearTimeout(initialTimeout)
+            if (intervalRef) clearInterval(intervalRef)
+        }
+    }, [accessToken])
 
     const login = useCallback(async (email: string, password: string) => {
         try {
@@ -75,6 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             // Store in localStorage
             localStorage.setItem('lr_access_token', result.accessToken)
+            localStorage.setItem('lr_token_time', Date.now().toString())
             if (result.refreshToken) {
                 localStorage.setItem('lr_refresh_token', result.refreshToken)
             }
@@ -114,6 +181,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             if (result.accessToken) {
                 localStorage.setItem('lr_access_token', result.accessToken)
+                localStorage.setItem('lr_token_time', Date.now().toString())
                 if (result.refreshToken) {
                     localStorage.setItem('lr_refresh_token', result.refreshToken)
                 }
@@ -141,6 +209,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             // Store in localStorage
             localStorage.setItem('lr_access_token', result.accessToken)
+            localStorage.setItem('lr_token_time', Date.now().toString())
             if (result.refreshToken) {
                 localStorage.setItem('lr_refresh_token', result.refreshToken)
             }
@@ -169,6 +238,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem('lr_access_token')
         localStorage.removeItem('lr_refresh_token')
         localStorage.removeItem('lr_user')
+        localStorage.removeItem('lr_token_time')
         setAccessToken(null)
         setUser(null)
         router.push('/login')

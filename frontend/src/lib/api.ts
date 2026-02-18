@@ -57,8 +57,12 @@ class APIClient {
 
           // If already refreshing, queue this request
           if (this.isRefreshing) {
-            return new Promise((resolve) => {
+            return new Promise((resolve, reject) => {
               this.refreshSubscribers.push((newToken: string) => {
+                if (!newToken) {
+                  reject(error);
+                  return;
+                }
                 originalRequest.headers.Authorization = `Bearer ${newToken}`;
                 resolve(this.client(originalRequest));
               });
@@ -71,11 +75,19 @@ class APIClient {
             const oldToken = localStorage.getItem('lr_access_token');
             if (!oldToken) throw new Error('No token to refresh');
 
-            const refreshResponse = await axios.post(`${this.baseURL}/api/auth/refresh-token`, {
-              accessToken: oldToken,
-            });
+            console.log('[Auth] Attempting token refresh...');
+
+            const refreshResponse = await axios.post(
+              `${this.baseURL}/api/auth/refresh-token`,
+              { accessToken: oldToken },
+              { timeout: 10000 } // 10 second timeout
+            );
 
             const { accessToken: newToken, refreshToken: newRefreshToken } = refreshResponse.data.data;
+
+            if (!newToken) throw new Error('No new token received');
+
+            console.log('[Auth] Token refreshed successfully');
 
             // Store new tokens
             localStorage.setItem('lr_access_token', newToken);
@@ -91,6 +103,12 @@ class APIClient {
             originalRequest.headers.Authorization = `Bearer ${newToken}`;
             return this.client(originalRequest);
           } catch (refreshError) {
+            console.log('[Auth] Token refresh failed, redirecting to login');
+
+            // Reject all queued requests
+            this.refreshSubscribers.forEach((cb) => cb(''));
+            this.refreshSubscribers = [];
+
             // Refresh failed — force logout
             localStorage.removeItem('lr_access_token');
             localStorage.removeItem('lr_refresh_token');

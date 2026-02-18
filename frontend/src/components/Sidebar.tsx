@@ -36,13 +36,13 @@ export default function Sidebar() {
 
   // Try to get user info from localStorage
   let userName = 'User'
-  let userRole = ''
+  let userRole = []
   try {
     const stored = localStorage.getItem('lr_user')
     if (stored) {
       const parsed = JSON.parse(stored)
       userName = parsed.fullName || parsed.email || 'User'
-      userRole = parsed.roles?.[0] || ''
+      userRole = parsed.roles || []
     }
   } catch { }
 
@@ -115,7 +115,9 @@ export default function Sidebar() {
             <div className="flex-1 min-w-0">
               <p className="text-sm text-white truncate">{userName}</p>
               {userRole && (
-                <p className="text-xs text-gray-400 capitalize">{userRole}</p>
+                userRole.map((role: string) => (
+                  <p className="text-xs text-gray-400 capitalize">{role}</p>
+                ))
               )}
             </div>
           </div>
