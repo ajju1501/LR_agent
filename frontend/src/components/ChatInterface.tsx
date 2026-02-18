@@ -1,19 +1,12 @@
 'use client'
 
 import { useChat } from '@/context/ChatContext'
-import { useEffect } from 'react'
 import MessageList from './MessageList'
 import MessageInput from './MessageInput'
 import Sidebar from './Sidebar'
 
 export default function ChatInterface() {
-  const { currentSessionId, messages, isLoading, error, createSession, clearError } = useChat()
-
-  useEffect(() => {
-    if (!currentSessionId) {
-      createSession()
-    }
-  }, [])
+  const { messages, isLoading, error, clearError } = useChat()
 
   return (
     <div className="h-screen flex bg-gray-50">

@@ -44,20 +44,29 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const sendMessage = useCallback(
     async (message: string) => {
-      if (!currentSessionId || !message.trim()) return
+      if (!message.trim()) return
 
       try {
         setIsLoading(true)
         setError(null)
 
-        const response = await apiClient.sendMessage(currentSessionId, message)
+        // Lazily create a session if one doesn't exist yet
+        let sessionId = currentSessionId
+        if (!sessionId) {
+          const session = await apiClient.createSession()
+          sessionId = session.id
+          setCurrentSessionId(sessionId)
+          setSessions(prev => [session, ...prev])
+        }
+
+        const response = await apiClient.sendMessage(sessionId, message)
 
         // Add user message
         setMessages(prev => [
           ...prev,
           {
             id: response.messageId,
-            sessionId: currentSessionId,
+            sessionId: sessionId!,
             role: 'user',
             content: message,
             timestamp: new Date(),
@@ -69,7 +78,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           ...prev,
           {
             id: response.id,
-            sessionId: currentSessionId,
+            sessionId: sessionId!,
             role: 'assistant',
             content: response.answer,
             timestamp: response.timestamp,
