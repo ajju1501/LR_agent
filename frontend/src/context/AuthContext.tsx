@@ -46,15 +46,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                         setUser(profile)
                         localStorage.setItem('lr_user', JSON.stringify(profile))
                     } catch (err) {
-                        // Token expired or server error
+                        // Token expired or server error — the interceptor will try to refresh
                         console.error('Session restoration failed:', err)
                         localStorage.removeItem('lr_access_token')
+                        localStorage.removeItem('lr_refresh_token')
                         localStorage.removeItem('lr_user')
                         setAccessToken(null)
                         setUser(null)
                     }
                 } catch {
                     localStorage.removeItem('lr_access_token')
+                    localStorage.removeItem('lr_refresh_token')
                     localStorage.removeItem('lr_user')
                 }
             }
@@ -73,6 +75,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             // Store in localStorage
             localStorage.setItem('lr_access_token', result.accessToken)
+            if (result.refreshToken) {
+                localStorage.setItem('lr_refresh_token', result.refreshToken)
+            }
             localStorage.setItem('lr_user', JSON.stringify(result.user))
 
             setAccessToken(result.accessToken)
@@ -109,6 +114,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             if (result.accessToken) {
                 localStorage.setItem('lr_access_token', result.accessToken)
+                if (result.refreshToken) {
+                    localStorage.setItem('lr_refresh_token', result.refreshToken)
+                }
                 localStorage.setItem('lr_user', JSON.stringify(result.user))
                 setAccessToken(result.accessToken)
                 setUser(result.user)
@@ -133,6 +141,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             // Store in localStorage
             localStorage.setItem('lr_access_token', result.accessToken)
+            if (result.refreshToken) {
+                localStorage.setItem('lr_refresh_token', result.refreshToken)
+            }
             localStorage.setItem('lr_user', JSON.stringify(result.user))
 
             setAccessToken(result.accessToken)
@@ -156,6 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const logout = useCallback(() => {
         localStorage.removeItem('lr_access_token')
+        localStorage.removeItem('lr_refresh_token')
         localStorage.removeItem('lr_user')
         setAccessToken(null)
         setUser(null)

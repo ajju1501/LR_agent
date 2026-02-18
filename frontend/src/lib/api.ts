@@ -14,6 +14,8 @@ class APIClient {
   private client: AxiosInstance;
   private baseURL: string;
   private userId: string;
+  private isRefreshing: boolean = false;
+  private refreshSubscribers: Array<(token: string) => void> = [];
 
   constructor(baseURL: string = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000') {
     this.baseURL = baseURL;
@@ -36,10 +38,72 @@ class APIClient {
       return cfg;
     });
 
-    // Add error interceptor
+    // Add error interceptor with auto-refresh on 401
     this.client.interceptors.response.use(
       (response) => response,
-      (error) => this.handleError(error)
+      async (error) => {
+        const originalRequest = error.config;
+
+        // If we get a 401 and haven't already tried refreshing for this request
+        if (error.response?.status === 401 && !originalRequest._retry && typeof window !== 'undefined') {
+          const path = window.location.pathname;
+
+          // Don't refresh on login/auth pages or refresh-token endpoint itself
+          if (path === '/login' || originalRequest.url?.includes('/refresh-token')) {
+            return this.handleError(error);
+          }
+
+          originalRequest._retry = true;
+
+          // If already refreshing, queue this request
+          if (this.isRefreshing) {
+            return new Promise((resolve) => {
+              this.refreshSubscribers.push((newToken: string) => {
+                originalRequest.headers.Authorization = `Bearer ${newToken}`;
+                resolve(this.client(originalRequest));
+              });
+            });
+          }
+
+          this.isRefreshing = true;
+
+          try {
+            const oldToken = localStorage.getItem('lr_access_token');
+            if (!oldToken) throw new Error('No token to refresh');
+
+            const refreshResponse = await axios.post(`${this.baseURL}/api/auth/refresh-token`, {
+              accessToken: oldToken,
+            });
+
+            const { accessToken: newToken, refreshToken: newRefreshToken } = refreshResponse.data.data;
+
+            // Store new tokens
+            localStorage.setItem('lr_access_token', newToken);
+            if (newRefreshToken) {
+              localStorage.setItem('lr_refresh_token', newRefreshToken);
+            }
+
+            // Retry all queued requests with new token
+            this.refreshSubscribers.forEach((cb) => cb(newToken));
+            this.refreshSubscribers = [];
+
+            // Retry the original request
+            originalRequest.headers.Authorization = `Bearer ${newToken}`;
+            return this.client(originalRequest);
+          } catch (refreshError) {
+            // Refresh failed — force logout
+            localStorage.removeItem('lr_access_token');
+            localStorage.removeItem('lr_refresh_token');
+            localStorage.removeItem('lr_user');
+            window.location.href = '/login';
+            return Promise.reject(refreshError);
+          } finally {
+            this.isRefreshing = false;
+          }
+        }
+
+        return this.handleError(error);
+      }
     );
   }
 
@@ -60,16 +124,6 @@ class APIClient {
       message: (error.response?.data as any)?.message || error.message || 'An error occurred',
       details: error.response?.data as Record<string, any>,
     };
-
-    // Auto-logout on 401
-    if (apiError.status === 401 && typeof window !== 'undefined') {
-      const path = window.location.pathname;
-      if (path !== '/login') {
-        localStorage.removeItem('lr_access_token');
-        localStorage.removeItem('lr_user');
-        window.location.href = '/login';
-      }
-    }
 
     return Promise.reject(apiError);
   }

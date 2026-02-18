@@ -19,6 +19,7 @@ export interface LRProfile {
 
 export interface AuthResult {
     accessToken: string;
+    refreshToken?: string;
     profile: LRProfile;
     roles: UserRole[];
 }
@@ -51,7 +52,7 @@ class LoginRadiusService {
                 { params: { apikey: this.apiKey, apiSecret: this.apiSecret } }
             );
 
-            const { access_token, Profile } = response.data;
+            const { access_token, refresh_token, Profile } = response.data;
 
             if (!access_token) {
                 throw new Error('No access token received from LoginRadius');
@@ -62,6 +63,7 @@ class LoginRadiusService {
 
             return {
                 accessToken: access_token,
+                refreshToken: refresh_token,
                 profile: Profile,
                 roles,
             };
@@ -116,9 +118,11 @@ class LoginRadiusService {
 
             // Step 3: Login immediately to get an access_token
             let accessToken = '';
+            let refreshToken: string | undefined;
             try {
                 const loginResult = await this.loginByEmail(email, password);
                 accessToken = loginResult.accessToken;
+                refreshToken = loginResult.refreshToken;
             } catch (loginErr) {
                 logger.warn('Auto-login after registration failed — user can login manually', {
                     error: String(loginErr),
@@ -127,6 +131,7 @@ class LoginRadiusService {
 
             return {
                 accessToken,
+                refreshToken,
                 profile,
                 roles: ['user'],
             };
@@ -148,13 +153,12 @@ class LoginRadiusService {
     async validateAccessToken(accessToken: string): Promise<{ isValid: boolean; expiresIn?: string }> {
         try {
             const response = await this.client.get('/identity/v2/auth/access_token/Validate', {
-                params: { apikey: this.apiKey },
-                headers: { Authorization: `Bearer ${accessToken}` },
+                params: { apikey: this.apiKey, access_token: accessToken },
             });
 
             return { isValid: true, expiresIn: response.data.expires_in };
         } catch (error: any) {
-            logger.warn('Access token validation failed', { error: error.message });
+            logger.warn('Access token validation failed', { error: error.response?.data?.Description || error.message });
             return { isValid: false };
         }
     }
@@ -166,8 +170,7 @@ class LoginRadiusService {
     async getProfileByToken(accessToken: string): Promise<LRProfile> {
         try {
             const response = await this.client.get('/identity/v2/auth/account', {
-                params: { apikey: this.apiKey },
-                headers: { Authorization: `Bearer ${accessToken}` },
+                params: { apikey: this.apiKey, access_token: accessToken },
             });
 
             return response.data;
@@ -260,6 +263,45 @@ class LoginRadiusService {
             }
         }
     }
+
+    /**
+     * Refresh an access token before it expires
+     * GET /api/v2/access_token/refresh
+     * Returns a new access_token with an extended expiry
+     */
+    async refreshAccessToken(oldAccessToken: string): Promise<{ accessToken: string; refreshToken?: string; expiresIn?: string }> {
+        try {
+            const response = await this.client.get('/api/v2/access_token/refresh', {
+                params: {
+                    access_token: oldAccessToken,
+                    secret: this.apiSecret,
+                    apikey: this.apiKey,
+                },
+            });
+
+            const { access_token, refresh_token, expires_in } = response.data;
+
+            if (!access_token) {
+                throw new Error('No access token received from refresh');
+            }
+
+            logger.info('Access token refreshed successfully');
+
+            return {
+                accessToken: access_token,
+                refreshToken: refresh_token,
+                expiresIn: expires_in,
+            };
+        } catch (error: any) {
+            const lrError = error.response?.data;
+            logger.error('Failed to refresh access token', {
+                error: lrError?.Description || error.message,
+                errorCode: lrError?.ErrorCode,
+            });
+            throw new Error(lrError?.Description || 'Failed to refresh token');
+        }
+    }
+
     /**
      * Exchange Access Token (Request Token to Access Token)
      * GET /api/v2/access_token
@@ -279,7 +321,7 @@ class LoginRadiusService {
                 throw new Error('Invalid response from LoginRadius');
             }
 
-            let { access_token, Profile } = response.data;
+            let { access_token, refresh_token, Profile } = response.data;
 
             // If Profile is not in the response (common for /api/v2/access_token),
             // fetch it using the new access token.
@@ -297,6 +339,7 @@ class LoginRadiusService {
 
             return {
                 accessToken: access_token,
+                refreshToken: refresh_token,
                 profile: Profile,
                 roles,
             };

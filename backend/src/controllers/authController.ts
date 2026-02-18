@@ -38,6 +38,7 @@ export async function login(req: Request, res: Response, next: NextFunction) {
             status: 'success',
             data: {
                 accessToken: result.accessToken,
+                refreshToken: result.refreshToken,
                 user: {
                     uid: result.profile.Uid,
                     email: primaryEmail,
@@ -45,7 +46,7 @@ export async function login(req: Request, res: Response, next: NextFunction) {
                     lastName: result.profile.LastName,
                     fullName: result.profile.FullName,
                     profileImage: result.profile.ProfileImage,
-                    roles: lrRoles, // Roles from LoginRadius
+                    roles: lrRoles,
                 },
             },
         });
@@ -97,13 +98,14 @@ export async function register(req: Request, res: Response, next: NextFunction) 
             status: 'success',
             data: {
                 accessToken: result.accessToken,
+                refreshToken: result.refreshToken,
                 user: {
                     uid: result.profile?.Uid,
                     email: primaryEmail,
                     firstName: result.profile?.FirstName,
                     lastName: result.profile?.LastName,
                     fullName: result.profile?.FullName,
-                    roles: lrRoles, // Roles from LoginRadius
+                    roles: lrRoles,
                 },
                 message: result.accessToken
                     ? 'Registration successful'
@@ -243,6 +245,7 @@ export async function exchangeCode(req: Request, res: Response, next: NextFuncti
             status: 'success',
             data: {
                 accessToken: result.accessToken,
+                refreshToken: result.refreshToken,
                 user: {
                     uid: result.profile.Uid,
                     email: primaryEmail,
@@ -259,6 +262,42 @@ export async function exchangeCode(req: Request, res: Response, next: NextFuncti
         res.status(401).json({
             status: 'error',
             message: error.message || 'Authentication failed',
+        });
+    }
+}
+
+/**
+ * POST /api/auth/refresh-token
+ * Refresh the access token using the current (possibly still valid) access token
+ */
+export async function refreshToken(req: Request, res: Response, next: NextFunction) {
+    try {
+        const { accessToken } = req.body;
+
+        if (!accessToken) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'accessToken is required',
+            });
+        }
+
+        logger.info('Refreshing access token');
+
+        const result = await loginRadiusService.refreshAccessToken(accessToken);
+
+        res.json({
+            status: 'success',
+            data: {
+                accessToken: result.accessToken,
+                refreshToken: result.refreshToken,
+                expiresIn: result.expiresIn,
+            },
+        });
+    } catch (error: any) {
+        logger.error('Token refresh error', { error: error.message });
+        res.status(401).json({
+            status: 'error',
+            message: error.message || 'Token refresh failed',
         });
     }
 }

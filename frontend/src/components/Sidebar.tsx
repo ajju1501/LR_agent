@@ -29,6 +29,7 @@ export default function Sidebar() {
 
   const handleLogout = () => {
     localStorage.removeItem('lr_access_token')
+    localStorage.removeItem('lr_refresh_token')
     localStorage.removeItem('lr_user')
     window.location.href = '/login'
   }
@@ -83,8 +84,8 @@ export default function Sidebar() {
                   key={session.id}
                   onClick={() => handleSelectSession(session.id)}
                   className={`group p-3 rounded-lg cursor-pointer transition-colors ${currentSessionId === session.id
-                      ? 'bg-gray-700 text-white'
-                      : 'hover:bg-gray-800 text-gray-300'
+                    ? 'bg-gray-700 text-white'
+                    : 'hover:bg-gray-800 text-gray-300'
                     }`}
                 >
                   <div className="flex items-start justify-between gap-2">

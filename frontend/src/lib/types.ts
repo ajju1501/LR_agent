@@ -73,11 +73,13 @@ export interface AuthUser {
 
 export interface LoginResponse {
   accessToken: string;
+  refreshToken?: string;
   user: AuthUser;
 }
 
 export interface RegisterResponse {
   accessToken: string;
+  refreshToken?: string;
   user: AuthUser;
   message: string;
 }
