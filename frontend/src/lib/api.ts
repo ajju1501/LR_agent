@@ -98,6 +98,14 @@ class APIClient {
     return response.data.data;
   }
 
+  async exchangeCode(token: string): Promise<LoginResponse> {
+    const response = await this.client.post<{ status: string; data: LoginResponse }>(
+      '/api/auth/exchange-code',
+      { token }
+    );
+    return response.data.data;
+  }
+
   async getProfile(): Promise<AuthUser> {
     const response = await this.client.get<{ status: string; data: AuthUser }>('/api/auth/profile');
     return response.data.data;

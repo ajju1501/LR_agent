@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { loginRadiusService } from '../services/loginRadiusService';
+import { loginRadiusService, UserRole } from '../services/loginRadiusService';
 import { userService } from '../services/userService';
 import { AuthenticatedRequest } from '../middleware/auth';
 import logger from '../utils/logger';
@@ -23,12 +23,16 @@ export async function login(req: Request, res: Response, next: NextFunction) {
 
         const result = await loginRadiusService.loginByEmail(email, password);
         const primaryEmail = result.profile.Email?.[0]?.Value || email;
+        const lrRoles = result.roles; // Roles from LoginRadius (source of truth)
 
-        // Upsert user in local DB to ensure they exist and have roles
-        const dbUser = await userService.upsertUser({
+        // Sync LoginRadius roles to local DB as cache
+        await userService.upsertUser({
             uid: result.profile.Uid,
-            email: primaryEmail
+            email: primaryEmail,
+            defaultRoles: lrRoles
         });
+        // Always overwrite local DB roles with LoginRadius roles
+        await userService.updateUserRoles(result.profile.Uid, lrRoles);
 
         res.json({
             status: 'success',
@@ -41,7 +45,7 @@ export async function login(req: Request, res: Response, next: NextFunction) {
                     lastName: result.profile.LastName,
                     fullName: result.profile.FullName,
                     profileImage: result.profile.ProfileImage,
-                    roles: dbUser.roles, // Use roles from DB
+                    roles: lrRoles, // Roles from LoginRadius
                 },
             },
         });
@@ -80,12 +84,13 @@ export async function register(req: Request, res: Response, next: NextFunction) 
         );
 
         const primaryEmail = result.profile?.Email?.[0]?.Value || email;
+        const lrRoles = result.roles; // Roles from LoginRadius (source of truth)
 
-        // Store user and roles in LOCAL DB
-        const dbUser = await userService.upsertUser({
+        // Sync to local DB as cache
+        await userService.upsertUser({
             uid: result.profile?.Uid,
             email: primaryEmail,
-            defaultRoles: ['user']
+            defaultRoles: lrRoles
         });
 
         res.status(201).json({
@@ -98,7 +103,7 @@ export async function register(req: Request, res: Response, next: NextFunction) 
                     firstName: result.profile?.FirstName,
                     lastName: result.profile?.LastName,
                     fullName: result.profile?.FullName,
-                    roles: dbUser.roles,
+                    roles: lrRoles, // Roles from LoginRadius
                 },
                 message: result.accessToken
                     ? 'Registration successful'
@@ -157,8 +162,8 @@ export async function assignRole(req: AuthenticatedRequest, res: Response, next:
         }
 
         // Validate that requested roles are valid
-        const validRoles = ['administrator', 'user', 'observer'];
-        const invalid = roles.filter((r: string) => !validRoles.includes(r));
+        const validRoles: UserRole[] = ['administrator', 'user', 'observer'];
+        const invalid = roles.filter((r: string) => !validRoles.includes(r as UserRole));
         if (invalid.length > 0) {
             return res.status(400).json({
                 status: 'error',
@@ -166,10 +171,13 @@ export async function assignRole(req: AuthenticatedRequest, res: Response, next:
             });
         }
 
-        // Update roles in LOCAL DB instead of LoginRadius
+        // Step 1: Assign roles in LoginRadius (source of truth)
+        await loginRadiusService.assignRoles(uid, roles);
+
+        // Step 2: Sync to local DB as cache
         await userService.updateUserRoles(uid, roles);
 
-        logger.info('Role assigned by admin', {
+        logger.info('Role assigned via LoginRadius + synced to DB', {
             adminUid: req.user?.uid,
             targetUid: uid,
             roles,
@@ -177,7 +185,7 @@ export async function assignRole(req: AuthenticatedRequest, res: Response, next:
 
         res.json({
             status: 'success',
-            message: `Roles [${roles.join(', ')}] assigned to user ${uid}`,
+            message: `Roles [${roles.join(', ')}] assigned to user ${uid} in LoginRadius`,
         });
     } catch (error: any) {
         logger.error('Assign role error', { error: error.message });
@@ -200,5 +208,57 @@ export async function setupRoles(req: Request, res: Response, next: NextFunction
     } catch (error: any) {
         logger.error('Setup roles error', { error: error.message });
         next(error);
+    }
+}
+/**
+ * POST /api/auth/exchange-code
+ * Exchange short-lived token (auth code) for a long-lived access token
+ */
+export async function exchangeCode(req: Request, res: Response, next: NextFunction) {
+    try {
+        const { token } = req.body;
+
+        if (!token) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Token is required',
+            });
+        }
+
+        logger.info('OAuth code exchange attempt');
+
+        const result = await loginRadiusService.exchangeCode(token);
+        const primaryEmail = result.profile.Email?.[0]?.Value || '';
+        const lrRoles = result.roles;
+
+        // Sync to local DB
+        await userService.upsertUser({
+            uid: result.profile.Uid,
+            email: primaryEmail,
+            defaultRoles: lrRoles
+        });
+        await userService.updateUserRoles(result.profile.Uid, lrRoles);
+
+        res.json({
+            status: 'success',
+            data: {
+                accessToken: result.accessToken,
+                user: {
+                    uid: result.profile.Uid,
+                    email: primaryEmail,
+                    firstName: result.profile.FirstName,
+                    lastName: result.profile.LastName,
+                    fullName: result.profile.FullName,
+                    profileImage: result.profile.ProfileImage,
+                    roles: lrRoles,
+                },
+            },
+        });
+    } catch (error: any) {
+        logger.error('Code exchange error', { error: error.message });
+        res.status(401).json({
+            status: 'error',
+            message: error.message || 'Authentication failed',
+        });
     }
 }

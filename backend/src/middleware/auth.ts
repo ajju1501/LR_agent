@@ -47,10 +47,14 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
                 });
             }
 
-            // Ensure user exists locally and get their roles
             const primaryEmail = profile.Email?.[0]?.Value || '';
-            const dbUser = await userService.ensureUser(profile.Uid, primaryEmail);
-            const roles = dbUser.roles;
+
+            // Fetch roles from LoginRadius (source of truth)
+            const lrRoles = await loginRadiusService.getRolesByUid(profile.Uid);
+
+            // Sync to local DB as cache
+            await userService.ensureUser(profile.Uid, primaryEmail);
+            await userService.updateUserRoles(profile.Uid, lrRoles);
 
             req.user = {
                 uid: profile.Uid,
@@ -58,7 +62,7 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
                 firstName: profile.FirstName,
                 lastName: profile.LastName,
                 fullName: profile.FullName,
-                roles,
+                roles: lrRoles, // Roles from LoginRadius
                 accessToken,
             };
 

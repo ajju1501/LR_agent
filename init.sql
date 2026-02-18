@@ -35,7 +35,6 @@ CREATE TABLE IF NOT EXISTS document_chunks (
   id VARCHAR(255) PRIMARY KEY,
   doc_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
   text TEXT NOT NULL,
-  embedding VECTOR(768),
   metadata JSONB,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -46,6 +45,3 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at);
 CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON document_chunks(doc_id);
 
--- Create indexes for similarity search (if using pgvector extension)
-CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON document_chunks USING ivfflat (embedding vector_cosine_ops)
-  WITH (lists = 100);

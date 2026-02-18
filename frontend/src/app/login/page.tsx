@@ -232,6 +232,35 @@ function LoginForm() {
                                 </button>
                             </p>
                         </div>
+
+                        {/* OAuth / OIDC Divider */}
+                        <div className="relative my-8">
+                            <div className="absolute inset-0 flex items-center">
+                                <span className="w-full border-t border-white/10"></span>
+                            </div>
+                            <div className="relative flex justify-center text-xs uppercase">
+                                <span className="bg-[#0f172a] px-2 text-purple-200/50">Or continue with</span>
+                            </div>
+                        </div>
+
+                        {/* OAuth Button */}
+                        <button
+                            type="button"
+                            onClick={() => {
+                                // These would normally come from process.env.NEXT_PUBLIC_*
+                                const apiKey = "b1f273a3-b452-4331-94d6-c5b9a562ebf2";
+                                const appName = "internal-ajaypagidipally";
+                                const redirectUri = encodeURIComponent("http://localhost:3000/callback");
+
+                                // LoginRadius Hosted Login Page URL
+                                const authUrl = `https://${appName}.hub.loginradius.com/auth.aspx?action=login&return_url=${redirectUri}&apikey=${apiKey}`;
+                                window.location.href = authUrl;
+                            }}
+                            className="w-full flex items-center justify-center gap-3 py-2.5 bg-white/5 border border-white/10 hover:bg-white/10 text-white font-medium rounded-lg transition-all duration-200"
+                        >
+                            <Shield className="w-5 h-5 text-purple-400" />
+                            OAuth 2.0 / OpenID Connect
+                        </button>
                     </div>
 
                     {/* Footer */}

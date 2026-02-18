@@ -13,6 +13,7 @@ interface AuthContextType {
     error: string | null
     login: (email: string, password: string) => Promise<void>
     register: (email: string, password: string, firstName: string, lastName: string, username: string) => Promise<void>
+    loginWithCode: (token: string) => Promise<void>
     logout: () => void
     hasRole: (role: UserRole) => boolean
     clearError: () => void
@@ -123,6 +124,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     }, [router])
 
+    const loginWithCode = useCallback(async (token: string) => {
+        try {
+            setIsLoading(true)
+            setError(null)
+
+            const result = await apiClient.exchangeCode(token)
+
+            // Store in localStorage
+            localStorage.setItem('lr_access_token', result.accessToken)
+            localStorage.setItem('lr_user', JSON.stringify(result.user))
+
+            setAccessToken(result.accessToken)
+            setUser(result.user)
+
+            // Redirect based on role
+            const roles = result.user.roles
+            if (roles.includes('administrator')) {
+                router.push('/admin')
+            } else if (roles.includes('observer')) {
+                router.push('/dashboard')
+            } else {
+                router.push('/chat')
+            }
+        } catch (err: any) {
+            setError(err.message || 'OAuth authentication failed')
+        } finally {
+            setIsLoading(false)
+        }
+    }, [router])
+
     const logout = useCallback(() => {
         localStorage.removeItem('lr_access_token')
         localStorage.removeItem('lr_user')
@@ -149,6 +180,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 error,
                 login,
                 register,
+                loginWithCode,
                 logout,
                 hasRole,
                 clearError,

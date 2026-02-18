@@ -14,6 +14,7 @@ export interface LRProfile {
     LastName?: string;
     FullName?: string;
     ProfileImage?: string;
+    Roles?: string[];
 }
 
 export interface AuthResult {
@@ -187,8 +188,10 @@ class LoginRadiusService {
                 params: { apikey: this.apiKey, apisecret: this.apiSecret },
             });
 
-            const roles = response.data?.Roles?.map((r: any) => r.Name) || [];
-            return roles as UserRole[];
+            const rawRoles = response.data?.Roles || [];
+            // LoginRadius may return roles as strings ["user"] or objects [{ Name: "user" }]
+            const roles = rawRoles.map((r: any) => (typeof r === 'string' ? r : r.Name)).filter(Boolean);
+            return (roles.length > 0 ? roles : ['user']) as UserRole[];
         } catch (error: any) {
             logger.warn('Failed to get roles for user', { uid, error: error.message });
             return ['user']; // Default to 'user' if role lookup fails
@@ -255,6 +258,75 @@ class LoginRadiusService {
             } else {
                 logger.error('Failed to create roles', { error: desc });
             }
+        }
+    }
+    /**
+     * Exchange Access Token (Request Token to Access Token)
+     * GET /api/v2/access_token
+     */
+    async exchangeCode(token: string): Promise<AuthResult> {
+        try {
+            // Manual URL construction to avoid any Axios param serialization issues
+            // and ensure we use the most common parameter names for LoginRadius.
+            const url = `https://api.loginradius.com/api/v2/access_token?token=${token}&secret=${this.apiSecret}&apikey=${this.apiKey}`;
+
+            logger.info('Exchanging code via LoginRadius API', { token, url: url.replace(this.apiSecret, '***') });
+
+            const response = await this.client.get(url);
+
+            if (!response.data || !response.data.access_token) {
+                logger.error('Unexpected LoginRadius response format', { data: response.data });
+                throw new Error('Invalid response from LoginRadius');
+            }
+
+            let { access_token, Profile } = response.data;
+
+            // If Profile is not in the response (common for /api/v2/access_token),
+            // fetch it using the new access token.
+            if (!Profile && access_token) {
+                logger.info('Profile missing from exchange response, fetching by token...');
+                Profile = await this.getProfileByToken(access_token);
+            }
+
+            if (!Profile) {
+                throw new Error('Failed to retrieve user profile from LoginRadius');
+            }
+
+            // Fetch user roles
+            const roles = await this.getRolesByUid(Profile.Uid);
+
+            return {
+                accessToken: access_token,
+                profile: Profile,
+                roles,
+            };
+        } catch (error: any) {
+            // Extremely detailed error logging
+            const errorDetails = {
+                message: error.message,
+                code: error.code,
+                stack: error.stack,
+                config: {
+                    url: error.config?.url,
+                    method: error.config?.method,
+                    headers: error.config?.headers,
+                },
+                response: error.response ? {
+                    status: error.response.status,
+                    statusText: error.response.statusText,
+                    data: error.response.data,
+                    headers: error.response.headers
+                } : 'NO_RESPONSE'
+            };
+
+            console.error('CRITICAL LOGINRADIUS ERROR:', JSON.stringify(errorDetails, null, 2));
+
+            logger.error('LoginRadius code exchange failed', {
+                message: error.message,
+                lrError: error.response?.data?.Description || 'Unknown error'
+            });
+
+            throw new Error(error.response?.data?.Description || 'Authentication handshake failed');
         }
     }
 }

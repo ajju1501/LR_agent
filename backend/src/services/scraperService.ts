@@ -24,6 +24,9 @@ class ScraperService {
     try {
       logger.info('Starting LoginRadius documentation scrape', { baseUrl: this.baseUrl, maxPages });
 
+      // Reset visited set so re-scraping works
+      this.visited.clear();
+
       const pages: ScrapedPage[] = [];
       const queue: string[] = [this.baseUrl];
       let depth = 0;
