@@ -43,6 +43,12 @@ export const config = {
     apiKey: process.env.LR_API_KEY || '',
     apiSecret: process.env.LR_API_SECRET || '',
     appName: process.env.LR_APP_NAME || '',
+    // OAuth 2.0 Authorization Code flow
+    clientId: process.env.LR_OAUTH_CLIENT_ID || '',
+    clientSecret: process.env.LR_OAUTH_CLIENT_SECRET || '',
+    oauthAppName: process.env.LR_OAUTH_APP_NAME || '',  // The OAuth app name from LR Admin Console
+    redirectUri: process.env.LR_OAUTH_REDIRECT_URI || 'http://localhost:3000/callback',
+    siteUrl: process.env.LR_SITE_URL || '', // e.g. https://internal-ajaypagidipally.hub.loginradius.com
   }
 };
 

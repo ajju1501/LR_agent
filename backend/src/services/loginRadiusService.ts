@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
+import crypto from 'crypto';
 import { config } from '../config/env';
 import logger from '../utils/logger';
 
@@ -24,14 +25,33 @@ export interface AuthResult {
     roles: UserRole[];
 }
 
+/**
+ * OAuth 2.0 Authorization URL parameters
+ */
+export interface OAuthAuthorizeParams {
+    authorizeUrl: string;
+    state: string;
+}
+
 class LoginRadiusService {
     private client: AxiosInstance;
     private apiKey: string;
     private apiSecret: string;
+    // OAuth 2.0 credentials
+    private clientId: string;
+    private clientSecret: string;
+    private oauthAppName: string;
+    private redirectUri: string;
+    private siteUrl: string;
 
     constructor() {
         this.apiKey = config.loginRadius.apiKey;
         this.apiSecret = config.loginRadius.apiSecret;
+        this.clientId = config.loginRadius.clientId;
+        this.clientSecret = config.loginRadius.clientSecret;
+        this.oauthAppName = config.loginRadius.oauthAppName;
+        this.redirectUri = config.loginRadius.redirectUri;
+        this.siteUrl = config.loginRadius.siteUrl;
 
         this.client = axios.create({
             baseURL: LR_API_BASE,
@@ -39,6 +59,172 @@ class LoginRadiusService {
             headers: { 'Content-Type': 'application/json' },
         });
     }
+
+    // ═══════════════════════════════════════════════════════
+    // OpenID Connect (OIDC) Authorization Code Grant Flow
+    // ═══════════════════════════════════════════════════════
+
+    /**
+     * Step 1: Generate the OIDC Authorization URL
+     * The frontend should redirect the user's browser to this URL.
+     *
+     * GET https://{siteUrl}/service/oidc/{OIDCAppName}/authorize
+     *   ?client_id=...
+     *   &redirect_uri=...
+     *   &response_type=code
+     *   &scope=openid profile email
+     *   &state=<random>
+     */
+    getAuthorizeUrl(): OAuthAuthorizeParams {
+        const state = crypto.randomBytes(16).toString('hex');
+        const params = new URLSearchParams({
+            client_id: this.clientId,
+            redirect_uri: this.redirectUri,
+            response_type: 'code',
+            scope: 'openid profile email',
+            state,
+        });
+
+        const authorizeUrl = `${this.siteUrl}/service/oidc/${this.oauthAppName}/authorize?${params.toString()}`;
+        logger.info('Generated OIDC authorize URL', { authorizeUrl: authorizeUrl.replace(this.clientId, '***') });
+
+        return { authorizeUrl, state };
+    }
+
+    /**
+     * Step 2: Exchange the authorization code for an access token.
+     * This is a server-to-server call — client_secret stays on the backend.
+     *
+     * POST https://{siteUrl}/api/oidc/{OIDCAppName}/token
+     * Body (application/x-www-form-urlencoded):
+     *   grant_type=authorization_code
+     *   client_id=...
+     *   client_secret=...
+     *   redirect_uri=...
+     *   code=<authorization_code>
+     */
+    async exchangeAuthorizationCode(code: string): Promise<AuthResult> {
+        try {
+            const tokenUrl = `${this.siteUrl}/api/oidc/${this.oauthAppName}/token`;
+
+            logger.info('Exchanging authorization code for access token', {
+                tokenUrl,
+                redirectUri: this.redirectUri,
+            });
+
+            const response = await axios.post(
+                tokenUrl,
+                new URLSearchParams({
+                    grant_type: 'authorization_code',
+                    client_id: this.clientId,
+                    client_secret: this.clientSecret,
+                    redirect_uri: this.redirectUri,
+                    code,
+                }).toString(),
+                {
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    timeout: 15000,
+                }
+            );
+
+            const { access_token, refresh_token, expires_in } = response.data;
+
+            if (!access_token) {
+                logger.error('No access_token in OAuth token response', { data: response.data });
+                throw new Error('No access token received from LoginRadius OAuth');
+            }
+
+            logger.info('OAuth token obtained successfully', { expiresIn: expires_in });
+
+            // Fetch user profile using the access token
+            const profile = await this.getProfileByToken(access_token);
+
+            if (!profile) {
+                throw new Error('Failed to retrieve user profile after OAuth token exchange');
+            }
+
+            // Fetch user roles
+            const roles = await this.getRolesByUid(profile.Uid);
+
+            return {
+                accessToken: access_token,
+                refreshToken: refresh_token,
+                profile,
+                roles,
+            };
+        } catch (error: any) {
+            const errorDetails = {
+                message: error.message,
+                status: error.response?.status,
+                data: error.response?.data,
+            };
+
+            logger.error('OAuth authorization code exchange failed', errorDetails);
+
+            const desc =
+                error.response?.data?.error_description ||
+                error.response?.data?.Description ||
+                error.message;
+            throw new Error(desc || 'OAuth authorization code exchange failed');
+        }
+    }
+
+    /**
+     * Refresh access token via OIDC
+     *
+     * POST https://{siteUrl}/api/oidc/{OIDCAppName}/token
+     * Body (application/x-www-form-urlencoded):
+     *   grant_type=refresh_token
+     *   client_id=...
+     *   client_secret=...
+     *   refresh_token=...
+     */
+    async refreshOAuthToken(refreshToken: string): Promise<{ accessToken: string; refreshToken?: string; expiresIn?: number }> {
+        try {
+            const tokenUrl = `${this.siteUrl}/api/oidc/${this.oauthAppName}/token`;
+
+            logger.info('Refreshing OAuth access token');
+
+            const response = await axios.post(
+                tokenUrl,
+                new URLSearchParams({
+                    grant_type: 'refresh_token',
+                    client_id: this.clientId,
+                    client_secret: this.clientSecret,
+                    refresh_token: refreshToken,
+                }).toString(),
+                {
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    timeout: 15000,
+                }
+            );
+
+            const { access_token, refresh_token, expires_in } = response.data;
+
+            if (!access_token) {
+                throw new Error('No access token received from OAuth refresh');
+            }
+
+            logger.info('OAuth token refreshed successfully', { expiresIn: expires_in });
+
+            return {
+                accessToken: access_token,
+                refreshToken: refresh_token,
+                expiresIn: expires_in,
+            };
+        } catch (error: any) {
+            const desc =
+                error.response?.data?.error_description ||
+                error.response?.data?.Description ||
+                error.message;
+            logger.error('OAuth token refresh failed', { error: desc });
+            throw new Error(desc || 'OAuth token refresh failed');
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // LoginRadius Identity API methods (email/password login, etc.)
+    // ═══════════════════════════════════════════════════════
 
     /**
      * Login by email using LoginRadius Auth API
@@ -93,7 +279,6 @@ class LoginRadiusService {
     ): Promise<AuthResult> {
         try {
             // Step 1: Create account via Management API (no SOTT required)
-
             const createResponse = await this.client.post(
                 '/identity/v2/manage/account',
                 {
@@ -140,11 +325,15 @@ class LoginRadiusService {
             logger.error('LoginRadius registration failed', {
                 message: lrError?.Description || error.message,
                 errorCode: lrError?.ErrorCode,
-                details: lrError, // Log the full object to see validation errors
+                details: lrError,
             });
             throw new Error(lrError?.Description || 'Registration failed');
         }
     }
+
+    // ═══════════════════════════════════════════════════════
+    // Token validation & profile retrieval
+    // ═══════════════════════════════════════════════════════
 
     /**
      * Validate access token
@@ -181,6 +370,10 @@ class LoginRadiusService {
         }
     }
 
+    // ═══════════════════════════════════════════════════════
+    // Role management (Management API)
+    // ═══════════════════════════════════════════════════════
+
     /**
      * Get roles assigned to a user by UID (Management API)
      * GET /identity/v2/manage/account/:uid/role
@@ -192,12 +385,11 @@ class LoginRadiusService {
             });
 
             const rawRoles = response.data?.Roles || [];
-            // LoginRadius may return roles as strings ["user"] or objects [{ Name: "user" }]
             const roles = rawRoles.map((r: any) => (typeof r === 'string' ? r : r.Name)).filter(Boolean);
             return (roles.length > 0 ? roles : ['user']) as UserRole[];
         } catch (error: any) {
             logger.warn('Failed to get roles for user', { uid, error: error.message });
-            return ['user']; // Default to 'user' if role lookup fails
+            return ['user'];
         }
     }
 
@@ -253,7 +445,6 @@ class LoginRadiusService {
 
             logger.info('LoginRadius roles created successfully');
         } catch (error: any) {
-            // Roles may already exist — that's OK
             const lrError = error.response?.data;
             const desc = lrError?.Description || error.message || '';
             if (lrError?.ErrorCode === 968 || desc.toLowerCase().includes('already exists')) {
@@ -265,9 +456,8 @@ class LoginRadiusService {
     }
 
     /**
-     * Refresh an access token before it expires
+     * Refresh an access token before it expires (legacy LR API)
      * GET /api/v2/access_token/refresh
-     * Returns a new access_token with an extended expiry
      */
     async refreshAccessToken(oldAccessToken: string): Promise<{ accessToken: string; refreshToken?: string; expiresIn?: string }> {
         try {
@@ -299,77 +489,6 @@ class LoginRadiusService {
                 errorCode: lrError?.ErrorCode,
             });
             throw new Error(lrError?.Description || 'Failed to refresh token');
-        }
-    }
-
-    /**
-     * Exchange Access Token (Request Token to Access Token)
-     * GET /api/v2/access_token
-     */
-    async exchangeCode(token: string): Promise<AuthResult> {
-        try {
-            // Manual URL construction to avoid any Axios param serialization issues
-            // and ensure we use the most common parameter names for LoginRadius.
-            const url = `https://api.loginradius.com/api/v2/access_token?token=${token}&secret=${this.apiSecret}&apikey=${this.apiKey}`;
-
-            logger.info('Exchanging code via LoginRadius API', { token, url: url.replace(this.apiSecret, '***') });
-
-            const response = await this.client.get(url);
-
-            if (!response.data || !response.data.access_token) {
-                logger.error('Unexpected LoginRadius response format', { data: response.data });
-                throw new Error('Invalid response from LoginRadius');
-            }
-
-            let { access_token, refresh_token, Profile } = response.data;
-
-            // If Profile is not in the response (common for /api/v2/access_token),
-            // fetch it using the new access token.
-            if (!Profile && access_token) {
-                logger.info('Profile missing from exchange response, fetching by token...');
-                Profile = await this.getProfileByToken(access_token);
-            }
-
-            if (!Profile) {
-                throw new Error('Failed to retrieve user profile from LoginRadius');
-            }
-
-            // Fetch user roles
-            const roles = await this.getRolesByUid(Profile.Uid);
-
-            return {
-                accessToken: access_token,
-                refreshToken: refresh_token,
-                profile: Profile,
-                roles,
-            };
-        } catch (error: any) {
-            // Extremely detailed error logging
-            const errorDetails = {
-                message: error.message,
-                code: error.code,
-                stack: error.stack,
-                config: {
-                    url: error.config?.url,
-                    method: error.config?.method,
-                    headers: error.config?.headers,
-                },
-                response: error.response ? {
-                    status: error.response.status,
-                    statusText: error.response.statusText,
-                    data: error.response.data,
-                    headers: error.response.headers
-                } : 'NO_RESPONSE'
-            };
-
-            console.error('CRITICAL LOGINRADIUS ERROR:', JSON.stringify(errorDetails, null, 2));
-
-            logger.error('LoginRadius code exchange failed', {
-                message: error.message,
-                lrError: error.response?.data?.Description || 'Unknown error'
-            });
-
-            throw new Error(error.response?.data?.Description || 'Authentication handshake failed');
         }
     }
 }

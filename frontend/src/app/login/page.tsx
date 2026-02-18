@@ -5,7 +5,7 @@ import { useAuth } from '@/context/AuthContext'
 import { Eye, EyeOff, Mail, Lock, User, AtSign, ArrowRight, Shield, MessageSquare, BarChart3 } from 'lucide-react'
 
 function LoginForm() {
-    const { login, register, isLoading, error, clearError } = useAuth()
+    const { login, register, isLoading, error, clearError, initiateOAuthLogin } = useAuth()
     const [isLogin, setIsLogin] = useState(true)
     const [showPassword, setShowPassword] = useState(false)
     const [formData, setFormData] = useState({
@@ -246,20 +246,12 @@ function LoginForm() {
                         {/* OAuth Button */}
                         <button
                             type="button"
-                            onClick={() => {
-                                // These would normally come from process.env.NEXT_PUBLIC_*
-                                const apiKey = "b1f273a3-b452-4331-94d6-c5b9a562ebf2";
-                                const appName = "internal-ajaypagidipally";
-                                const redirectUri = encodeURIComponent("http://localhost:3000/callback");
-
-                                // LoginRadius Hosted Login Page URL
-                                const authUrl = `https://${appName}.hub.loginradius.com/auth.aspx?action=login&return_url=${redirectUri}&apikey=${apiKey}`;
-                                window.location.href = authUrl;
-                            }}
+                            onClick={() => initiateOAuthLogin()}
+                            disabled={isLoading}
                             className="w-full flex items-center justify-center gap-3 py-2.5 bg-white/5 border border-white/10 hover:bg-white/10 text-white font-medium rounded-lg transition-all duration-200"
                         >
                             <Shield className="w-5 h-5 text-purple-400" />
-                            OAuth 2.0 / OpenID Connect
+                            Sign in with LoginRadius (OAuth 2.0)
                         </button>
                     </div>
 

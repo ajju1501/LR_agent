@@ -73,13 +73,14 @@ class APIClient {
 
           try {
             const oldToken = localStorage.getItem('lr_access_token');
-            if (!oldToken) throw new Error('No token to refresh');
+            const storedRefreshToken = localStorage.getItem('lr_refresh_token');
+            if (!oldToken && !storedRefreshToken) throw new Error('No token to refresh');
 
             console.log('[Auth] Attempting token refresh...');
 
             const refreshResponse = await axios.post(
               `${this.baseURL}/api/auth/refresh-token`,
-              { accessToken: oldToken },
+              { accessToken: oldToken, refreshToken: storedRefreshToken },
               { timeout: 10000 } // 10 second timeout
             );
 
@@ -174,6 +175,32 @@ class APIClient {
     const response = await this.client.post<{ status: string; data: LoginResponse }>(
       '/api/auth/exchange-code',
       { token }
+    );
+    return response.data.data;
+  }
+
+  // ──────────── OAuth 2.0 Authorization Code Flow ────────────
+
+  /**
+   * Get the OAuth 2.0 authorization URL from the backend.
+   * The frontend should redirect the user's browser to this URL.
+   */
+  async getOAuthAuthorizeUrl(): Promise<{ authorizeUrl: string; state: string }> {
+    const response = await this.client.get<{ status: string; data: { authorizeUrl: string; state: string } }>(
+      '/api/auth/oauth/authorize'
+    );
+    return response.data.data;
+  }
+
+  /**
+   * Exchange OAuth 2.0 authorization code for access token.
+   * The code is sent to the backend, which does the server-side exchange
+   * with client_id + client_secret (never exposed to browser).
+   */
+  async oauthCallback(code: string, state: string): Promise<LoginResponse> {
+    const response = await this.client.post<{ status: string; data: LoginResponse }>(
+      '/api/auth/oauth/callback',
+      { code, state }
     );
     return response.data.data;
   }

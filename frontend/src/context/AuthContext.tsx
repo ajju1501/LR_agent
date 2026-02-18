@@ -14,6 +14,8 @@ interface AuthContextType {
     login: (email: string, password: string) => Promise<void>
     register: (email: string, password: string, firstName: string, lastName: string, username: string) => Promise<void>
     loginWithCode: (token: string) => Promise<void>
+    loginWithOAuthCode: (code: string, state: string) => Promise<void>
+    initiateOAuthLogin: () => Promise<void>
     logout: () => void
     hasRole: (role: UserRole) => boolean
     clearError: () => void
@@ -85,7 +87,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ accessToken: currentToken }),
+                        body: JSON.stringify({
+                            accessToken: currentToken,
+                            refreshToken: localStorage.getItem('lr_refresh_token'),
+                        }),
                     }
                 )
 
@@ -234,11 +239,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     }, [router])
 
+    const loginWithOAuthCode = useCallback(async (code: string, state: string) => {
+        try {
+            setIsLoading(true)
+            setError(null)
+
+            const result = await apiClient.oauthCallback(code, state)
+
+            // Store in localStorage
+            localStorage.setItem('lr_access_token', result.accessToken)
+            localStorage.setItem('lr_token_time', Date.now().toString())
+            if (result.refreshToken) {
+                localStorage.setItem('lr_refresh_token', result.refreshToken)
+            }
+            localStorage.setItem('lr_user', JSON.stringify(result.user))
+
+            setAccessToken(result.accessToken)
+            setUser(result.user)
+
+            // Redirect based on role
+            const roles = result.user.roles
+            if (roles.includes('administrator')) {
+                router.push('/admin')
+            } else if (roles.includes('observer')) {
+                router.push('/dashboard')
+            } else {
+                router.push('/chat')
+            }
+        } catch (err: any) {
+            setError(err.message || 'OAuth authentication failed')
+        } finally {
+            setIsLoading(false)
+        }
+    }, [router])
+
+    const initiateOAuthLogin = useCallback(async () => {
+        try {
+            setIsLoading(true)
+            setError(null)
+
+            const { authorizeUrl, state } = await apiClient.getOAuthAuthorizeUrl()
+
+            // Store state for CSRF verification on callback
+            sessionStorage.setItem('oauth_state', state)
+
+            // Redirect user to LoginRadius authorize page
+            window.location.href = authorizeUrl
+        } catch (err: any) {
+            setError(err.message || 'Failed to initiate OAuth login')
+            setIsLoading(false)
+        }
+    }, [])
+
     const logout = useCallback(() => {
         localStorage.removeItem('lr_access_token')
         localStorage.removeItem('lr_refresh_token')
         localStorage.removeItem('lr_user')
         localStorage.removeItem('lr_token_time')
+        sessionStorage.removeItem('oauth_state')
         setAccessToken(null)
         setUser(null)
         router.push('/login')
@@ -263,6 +321,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 login,
                 register,
                 loginWithCode,
+                loginWithOAuthCode,
+                initiateOAuthLogin,
                 logout,
                 hasRole,
                 clearError,

@@ -8,7 +8,7 @@ import { Shield, Loader2 } from 'lucide-react'
 export default function CallbackPage() {
     const searchParams = useSearchParams()
     const router = useRouter()
-    const { loginWithCode, error } = useAuth()
+    const { loginWithOAuthCode, loginWithCode, error } = useAuth()
     const effectRan = useRef(false)
 
     useEffect(() => {
@@ -16,23 +16,47 @@ export default function CallbackPage() {
         if (effectRan.current) return
         effectRan.current = true
 
-        const token = searchParams.get('token')
+        const code = searchParams.get('code')
+        const state = searchParams.get('state')
+        const token = searchParams.get('token') // Legacy LR redirect
 
-        if (token) {
-            console.log('Detected OAuth token, exchanging...')
-            loginWithCode(token)
+        if (code) {
+            // ✅ OAuth 2.0 Authorization Code flow
+            console.log('[OAuth] Received authorization code, exchanging...')
+
+            // Verify state to prevent CSRF
+            const savedState = sessionStorage.getItem('oauth_state')
+            if (savedState && state && savedState !== state) {
+                console.error('[OAuth] State mismatch! Possible CSRF attack.')
+                router.push('/login?error=state_mismatch')
+                return
+            }
+
+            // Clean up stored state
+            sessionStorage.removeItem('oauth_state')
+
+            loginWithOAuthCode(code, state || '')
                 .then(() => {
-                    // Success is handled in loginWithCode via router.push
+                    // Success is handled in loginWithOAuthCode via router.push
                 })
                 .catch((err) => {
-                    console.error('Callback error:', err)
-                    // Error is handled in context
+                    console.error('[OAuth] Callback error:', err)
+                })
+        } else if (token) {
+            // Legacy: LoginRadius hosted page redirect with token
+            console.log('[Legacy] Detected token, exchanging...')
+            loginWithCode(token)
+                .then(() => {
+                    // Success handled in loginWithCode
+                })
+                .catch((err) => {
+                    console.error('[Legacy] Callback error:', err)
                 })
         } else {
-            console.error('No token found in URL')
-            router.push('/login?error=no_token')
+            console.error('No authorization code or token found in callback URL')
+            router.push('/login?error=no_code')
         }
-    }, [searchParams, loginWithCode, router])
+    }, [searchParams, loginWithOAuthCode, loginWithCode, router])
 
     return (
         <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
@@ -42,7 +66,7 @@ export default function CallbackPage() {
                 </div>
 
                 <h1 className="text-2xl font-bold text-white mb-2">Authenticating</h1>
-                <p className="text-purple-200/60 mb-8">Completing secure OAuth 2.0 handshake...</p>
+                <p className="text-purple-200/60 mb-8">Completing OAuth 2.0 Authorization Code exchange...</p>
 
                 <div className="flex justify-center">
                     <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
