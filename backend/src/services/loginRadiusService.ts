@@ -326,8 +326,18 @@ class LoginRadiusService {
                 message: lrError?.Description || error.message,
                 errorCode: lrError?.ErrorCode,
                 details: lrError,
+                validationErrors: lrError?.ValidationErrors || lrError?.Errors,
             });
-            throw new Error(lrError?.Description || 'Registration failed');
+
+            // Build a more informative error message
+            let errorMsg = lrError?.Description || 'Registration failed';
+            if (lrError?.ValidationErrors) {
+                const fieldErrors = lrError.ValidationErrors.map(
+                    (e: any) => `${e.Field}: ${e.Message}`
+                ).join('; ');
+                errorMsg = `${errorMsg} (${fieldErrors})`;
+            }
+            throw new Error(errorMsg);
         }
     }
 
@@ -413,46 +423,123 @@ class LoginRadiusService {
 
     /**
      * Create roles in LoginRadius (Management API, one-time setup)
-     * POST /identity/v2/manage/role
+     * POST /v2/manage/roles
      */
     async createRoles(): Promise<void> {
+        // Step 1: Fetch all existing permissions to get their IDs
+        let existingPermissions: { Name: string; Id: string }[] = [];
+        try {
+            const resp = await this.client.get('/v2/manage/permissions', {
+                params: { apikey: this.apiKey, apisecret: this.apiSecret }
+            });
+            // Handle both flat array and { Data: [] } formats
+            existingPermissions = Array.isArray(resp.data) ? resp.data : (resp.data?.Data || []);
+            logger.info(`Fetched ${existingPermissions.length} existing permissions`);
+        } catch (err: any) {
+            logger.warn('Failed to fetch existing permissions', { error: err.message });
+        }
+
+        const requiredPermissions = [
+            { Name: 'chat', Description: 'Ability to use the AI chat' },
+            { Name: 'manage-documents', Description: 'Ability to upload and delete documents' },
+            { Name: 'view-dashboard', Description: 'Ability to view analytics dashboard' },
+            { Name: 'manage-users', Description: 'Ability to assign roles and manage users' },
+        ];
+
+        const permNameToId: Record<string, string> = {};
+        for (const ep of existingPermissions) {
+            permNameToId[ep.Name] = ep.Id || '';
+        }
+
+        // Step 2: Create any missing permissions
+        for (const perm of requiredPermissions) {
+            if (!permNameToId[perm.Name]) {
+                try {
+                    const resp = await this.client.post(
+                        '/v2/manage/permissions',
+                        perm,
+                        { params: { apikey: this.apiKey, apisecret: this.apiSecret } }
+                    );
+                    const newId = resp.data?.Id;
+                    if (newId) {
+                        permNameToId[perm.Name] = newId;
+                        logger.info(`Permission "${perm.Name}" created with ID: ${newId}`);
+                    }
+                } catch (error: any) {
+                    const lrError = error.response?.data;
+                    const desc = lrError?.Description || error.message || '';
+                    if (lrError?.ErrorCode === 964 || desc.toLowerCase().includes('already exists')) {
+                        // If it says it exists but we didn't find it, we might need a refresh or just proceed
+                        logger.info(`Permission "${perm.Name}" reported as existing by API`);
+                    } else {
+                        logger.error(`Failed to create permission "${perm.Name}"`, { errorCode: lrError?.ErrorCode, description: desc });
+                    }
+                }
+            }
+        }
+
+        // Step 3: Define roles with their required permissions
         const roleDefs = [
             {
                 Name: 'administrator',
-                Permissions: {
-                    chat: true,
-                    'manage-documents': true,
-                    'view-dashboard': true,
-                    'manage-users': true,
-                },
+                Description: 'Full access to all features',
+                Permissions: ['chat', 'manage-documents', 'view-dashboard', 'manage-users']
             },
             {
                 Name: 'user',
-                Permissions: { chat: true },
+                Description: 'Has access to chat',
+                Permissions: ['chat']
             },
             {
                 Name: 'observer',
-                Permissions: { 'view-dashboard': true },
+                Description: 'Has access to view dashboard',
+                Permissions: ['view-dashboard']
             },
         ];
 
-        try {
-            await this.client.post(
-                '/identity/v2/manage/role',
-                { Roles: roleDefs },
-                { params: { apikey: this.apiKey, apisecret: this.apiSecret } }
-            );
+        // Step 4: Create roles using permission IDs
+        for (const role of roleDefs) {
+            try {
+                // Map permission names to IDs
+                const permissionIds = role.Permissions
+                    .map(pName => permNameToId[pName])
+                    .filter(id => !!id);
 
-            logger.info('LoginRadius roles created successfully');
-        } catch (error: any) {
-            const lrError = error.response?.data;
-            const desc = lrError?.Description || error.message || '';
-            if (lrError?.ErrorCode === 968 || desc.toLowerCase().includes('already exists')) {
-                logger.info('Roles already exist in LoginRadius');
-            } else {
-                logger.error('Failed to create roles', { error: desc });
+                const rolePayload = {
+                    ...role,
+                    Permissions: permissionIds
+                };
+
+                await this.client.post(
+                    '/v2/manage/roles',
+                    rolePayload,
+                    { params: { apikey: this.apiKey, apisecret: this.apiSecret } }
+                );
+                logger.info(`Role "${role.Name}" created successfully with ${permissionIds.length} permissions`);
+            } catch (error: any) {
+                const lrError = error.response?.data;
+                const desc = lrError?.Description || error.message || '';
+
+                if (lrError?.ErrorCode === 968 || desc.toLowerCase().includes('already exists')) {
+                    logger.info(`Role "${role.Name}" already exists in LoginRadius`);
+                } else {
+                    console.error(`[LR Error] Failed to create role "${role.Name}":`, {
+                        status: error.response?.status,
+                        data: lrError,
+                        message: error.message,
+                        sentPayload: JSON.stringify({
+                            ...role,
+                            Permissions: role.Permissions.map(p => permNameToId[p] || p)
+                        })
+                    });
+                    logger.error(`Failed to create role "${role.Name}"`, {
+                        errorCode: lrError?.ErrorCode,
+                        description: desc,
+                    });
+                }
             }
         }
+        logger.info('Role and Permission setup process completed successfully');
     }
 
     /**
