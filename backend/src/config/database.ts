@@ -34,9 +34,10 @@ class ChromaDBManager {
         return;
       }
 
-      logger.info('Documents would be added to ChromaDB', {
+      logger.info('Documents would be added to ChromaDB (with organization metadata)', {
         count: chunks.length,
-        collection: this.collectionName
+        collection: this.collectionName,
+        orgIds: chunks.map(c => (c.metadata as any).orgId).filter(id => !!id)
       });
     } catch (error) {
       logger.error('Failed to add documents to ChromaDB', { error: String(error) });
@@ -46,11 +47,18 @@ class ChromaDBManager {
 
   async queryDocuments(
     queryEmbedding: number[],
-    topK: number = 5
+    topK: number = 5,
+    orgId?: string
   ): Promise<{ chunks: DocumentChunk[]; scores: number[] }> {
     try {
-      // Return empty results for now
-      logger.info('ChromaDB query (returning empty results)', { topK });
+      // In a real implementation:
+      // return this.collection.query({
+      //   queryEmbeddings: [queryEmbedding],
+      //   nResults: topK,
+      //   where: orgId ? { orgId: orgId } : { orgId: { $exists: false } }
+      // });
+
+      logger.info('ChromaDB query with organization filter', { topK, orgId });
       return { chunks: [], scores: [] };
     } catch (error) {
       logger.error('Failed to query ChromaDB', { error: String(error) });

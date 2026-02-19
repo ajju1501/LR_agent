@@ -12,17 +12,18 @@ interface RetrievalResult {
 class RetrievalService {
   async retrieveContext(
     query: string,
+    orgId?: string,
     topK: number = config.rag.retrievalTopK,
     threshold: number = config.rag.confidenceThreshold
   ): Promise<RetrievalResult> {
     try {
-      logger.info('Retrieving context', { query: query.substring(0, 50), topK, threshold });
+      logger.info('Retrieving context', { query: query.substring(0, 50), topK, threshold, orgId });
 
       // Generate embedding for query
       const queryEmbedding = await embeddingService.generateEmbedding(query);
 
-      // Query ChromaDB
-      const { chunks, scores } = await chromaDBManager.queryDocuments(queryEmbedding, topK);
+      // Query ChromaDB with organization filter
+      const { chunks, scores } = await chromaDBManager.queryDocuments(queryEmbedding, topK, orgId);
 
       // Filter by threshold (convert distance to similarity score)
       // ChromaDB returns distances, we convert to similarity using cosine: similarity = 1 - distance
@@ -31,7 +32,7 @@ class RetrievalService {
         return similarity >= threshold;
       });
 
-      logger.info('Context retrieved', { retrieved: chunks.length, filtered: filtered.length });
+      logger.info('Context retrieved', { retrieved: chunks.length, filtered: filtered.length, orgId });
 
       return {
         chunks: filtered,

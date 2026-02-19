@@ -138,11 +138,18 @@ class UserService {
 
     async updateUserRoles(uid: string, roles: UserRole[]): Promise<void> {
         try {
-            await this.pool.query(
-                'UPDATE users SET roles = $1, updated_at = CURRENT_TIMESTAMP WHERE uid = $2',
-                [JSON.stringify(roles), uid]
-            );
-            logger.info('User roles updated in DB', { uid, roles });
+            // Only update if roles have actually changed to avoid DB write-spam
+            const currentRoles = await this.getUserRoles(uid);
+            const isDifferent = roles.length !== currentRoles.length ||
+                roles.some(r => !currentRoles.includes(r));
+
+            if (isDifferent) {
+                await this.pool.query(
+                    'UPDATE users SET roles = $1, updated_at = CURRENT_TIMESTAMP WHERE uid = $2',
+                    [JSON.stringify(roles), uid]
+                );
+                logger.info('User roles updated in DB', { uid, roles });
+            }
         } catch (error) {
             logger.error('Failed to update user roles in DB', { uid, error: String(error) });
             throw error;

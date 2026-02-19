@@ -14,6 +14,7 @@ export interface AuthenticatedRequest extends Request {
         lastName?: string;
         fullName?: string;
         roles: UserRole[];
+        orgId?: string; // Active organization ID
         accessToken: string;
     };
 }
@@ -21,9 +22,11 @@ export interface AuthenticatedRequest extends Request {
 /**
  * Middleware: Requires a valid LoginRadius access token.
  * Attaches user profile + roles to req.user.
+ * Also handles organization context if x-organization-id header is present.
  */
 export function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     const authHeader = req.headers.authorization;
+    const orgIdHeader = req.headers['x-organization-id'] as string;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return res.status(401).json({
@@ -49,8 +52,28 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
 
             const primaryEmail = profile.Email?.[0]?.Value || '';
 
-            // Fetch roles from LoginRadius (source of truth)
+            // 1. Fetch global roles
             const lrRoles = await loginRadiusService.getRolesByUid(profile.Uid);
+
+            // 2. Fetch organization context
+            const orgContexts = await loginRadiusService.getUserOrgContext(profile.Uid);
+
+            // 3. Verify organization access if header is present
+            let activeOrgId: string | undefined = undefined;
+            if (orgIdHeader) {
+                const hasOrgAccess = orgContexts.some(ctx => ctx.OrgId === orgIdHeader);
+                if (!hasOrgAccess && !lrRoles.includes('administrator')) {
+                    return res.status(403).json({
+                        status: 'error',
+                        message: 'Unauthorized: User does not belong to the specified organization',
+                    });
+                }
+                activeOrgId = orgIdHeader;
+            } else if (orgContexts.length > 0) {
+                // Default to first org if none specified? 
+                // Better to leave it empty if not explicitly asked.
+                // activeOrgId = orgContexts[0].OrgId;
+            }
 
             // Sync to local DB as cache
             await userService.ensureUser(profile.Uid, primaryEmail);
@@ -62,7 +85,8 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
                 firstName: profile.FirstName,
                 lastName: profile.LastName,
                 fullName: profile.FullName,
-                roles: lrRoles, // Roles from LoginRadius
+                roles: lrRoles,
+                orgId: activeOrgId,
                 accessToken,
             };
 

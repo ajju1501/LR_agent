@@ -6,6 +6,7 @@ import { AppError } from './types';
 import authRoutes from './routes/authRoutes';
 import chatRoutes from './routes/chatRoutes';
 import documentRoutes from './routes/documentRoutes';
+import orgRoutes from './routes/orgRoutes';
 import { requireAuth, requireRole } from './middleware/auth';
 
 export function createApp(): Express {
@@ -16,7 +17,7 @@ export function createApp(): Express {
     origin: config.app.frontendUrl,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-organization-id'],
   }));
 
   app.use(express.json({ limit: '50mb' }));
@@ -58,6 +59,9 @@ export function createApp(): Express {
 
   // Document routes — requires auth, role: administrator only
   app.use('/api/documents', requireAuth, requireRole('administrator'), documentRoutes);
+
+  // Organization routes — auth + role checks handled per-route in orgRoutes.ts
+  app.use('/api/orgs', orgRoutes);
 
   // Dashboard stats (observer + administrator)
   app.get('/api/dashboard/stats', requireAuth, requireRole('administrator', 'observer'), async (req: Request, res: Response) => {

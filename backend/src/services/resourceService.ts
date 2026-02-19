@@ -36,6 +36,7 @@ class ResourceService {
                     type VARCHAR(20) NOT NULL,
                     name VARCHAR(500) NOT NULL,
                     source TEXT NOT NULL,
+                    org_id VARCHAR(255),
                     status VARCHAR(20) DEFAULT 'processing',
                     chunks_count INT DEFAULT 0,
                     error TEXT,
@@ -44,8 +45,16 @@ class ResourceService {
                 )
             `);
 
+            // Migration: Add org_id column if it doesn't exist
+            try {
+                await this.pool.query('ALTER TABLE resources ADD COLUMN IF NOT EXISTS org_id VARCHAR(255)');
+            } catch (err) {
+                logger.debug('Note: resources.org_id column check complete');
+            }
+
             await this.pool.query(`
                 CREATE INDEX IF NOT EXISTS idx_resources_type ON resources(type);
+                CREATE INDEX IF NOT EXISTS idx_resources_org_id ON resources(org_id);
             `);
 
             logger.info('Resources table verified');
@@ -60,16 +69,17 @@ class ResourceService {
     async processPDF(
         buffer: Buffer,
         filename: string,
-        uploadedBy: string
+        uploadedBy: string,
+        orgId?: string
     ): Promise<Resource> {
         const { v4: uuidv4 } = await import('uuid');
         const resourceId = uuidv4();
 
         // Insert record as "processing"
         await this.pool.query(
-            `INSERT INTO resources (id, type, name, source, status, uploaded_by)
-             VALUES ($1, 'pdf', $2, $3, 'processing', $4)`,
-            [resourceId, filename, filename, uploadedBy]
+            `INSERT INTO resources (id, type, name, source, status, uploaded_by, org_id)
+             VALUES ($1, 'pdf', $2, $3, 'processing', $4, $5)`,
+            [resourceId, filename, filename, uploadedBy, orgId || null]
         );
 
         try {
@@ -95,6 +105,7 @@ class ResourceService {
                     source: 'pdf-upload',
                     category: 'uploaded-document',
                     url: `upload://${filename}`,
+                    orgId: orgId, // Pass orgId to vector DB meta
                 }
             );
 
@@ -108,6 +119,7 @@ class ResourceService {
                 resourceId,
                 filename,
                 chunks: doc.chunks.length,
+                orgId
             });
 
             return this.getResource(resourceId) as Promise<Resource>;
@@ -127,7 +139,8 @@ class ResourceService {
      */
     async processGitHubRepo(
         repoUrl: string,
-        uploadedBy: string
+        uploadedBy: string,
+        orgId?: string
     ): Promise<Resource> {
         const { v4: uuidv4 } = await import('uuid');
         const resourceId = uuidv4();
@@ -142,9 +155,9 @@ class ResourceService {
 
         // Insert record as "processing"
         await this.pool.query(
-            `INSERT INTO resources (id, type, name, source, status, uploaded_by)
-             VALUES ($1, 'github', $2, $3, 'processing', $4)`,
-            [resourceId, repoName, repoUrl, uploadedBy]
+            `INSERT INTO resources (id, type, name, source, status, uploaded_by, org_id)
+             VALUES ($1, 'github', $2, $3, 'processing', $4, $5)`,
+            [resourceId, repoName, repoUrl, uploadedBy, orgId || null]
         );
 
         try {
@@ -207,6 +220,7 @@ class ResourceService {
                         source: 'github',
                         category: 'repository',
                         url: `https://github.com/${repoName}`,
+                        orgId: orgId,
                     }
                 );
                 totalChunks += readmeDoc.chunks.length;
@@ -240,6 +254,7 @@ class ResourceService {
                                     source: 'github',
                                     category: 'repository',
                                     url: `https://github.com/${repoName}/blob/HEAD/${file.path}`,
+                                    orgId: orgId,
                                 }
                             );
                             return doc.chunks.length;
@@ -270,6 +285,7 @@ class ResourceService {
                 repo: repoName,
                 totalChunks,
                 filesProcessed: filesToFetch.length,
+                orgId
             });
 
             return this.getResource(resourceId) as Promise<Resource>;
@@ -292,12 +308,22 @@ class ResourceService {
     }
 
     /**
-     * List all resources
+     * List resources filtered by organization
      */
-    async listResources(): Promise<Resource[]> {
-        const result = await this.pool.query(
-            'SELECT * FROM resources ORDER BY created_at DESC'
-        );
+    async listResources(orgId?: string): Promise<Resource[]> {
+        let query = 'SELECT * FROM resources';
+        const params: any[] = [];
+
+        if (orgId) {
+            query += ' WHERE org_id = $1';
+            params.push(orgId);
+        } else {
+            query += ' WHERE org_id IS NULL';
+        }
+
+        query += ' ORDER BY created_at DESC';
+
+        const result = await this.pool.query(query, params);
         return result.rows;
     }
 

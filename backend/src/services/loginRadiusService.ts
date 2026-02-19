@@ -33,6 +33,28 @@ export interface OAuthAuthorizeParams {
     state: string;
 }
 
+export interface LROrganization {
+    Id: string;
+    Name: string;
+    Status?: string;
+    CreatedDate?: string;
+    ModifiedDate?: string;
+    [key: string]: any;
+}
+
+export interface LROrgRole {
+    Id: string;
+    Name: string;
+    [key: string]: any;
+}
+
+export interface LRUserOrgContext {
+    OrgId: string;
+    OrgName?: string;
+    Roles?: string[];
+    [key: string]: any;
+}
+
 class LoginRadiusService {
     private client: AxiosInstance;
     private apiKey: string;
@@ -541,6 +563,188 @@ class LoginRadiusService {
         }
         logger.info('Role and Permission setup process completed successfully');
     }
+
+    // ═══════════════════════════════════════════════════════
+    // Organization Management (Management API)
+    // ═══════════════════════════════════════════════════════
+
+    /**
+     * List all organizations in the tenant
+     * GET /v2/manage/organizations
+     */
+    async listOrganizations(): Promise<LROrganization[]> {
+        try {
+            const response = await this.client.get('/v2/manage/organizations', {
+                params: { apikey: this.apiKey, apisecret: this.apiSecret },
+            });
+
+            const orgs = response.data?.Data || response.data || [];
+            logger.info(`Fetched ${orgs.length} organizations`);
+            return orgs;
+        } catch (error: any) {
+            const lrError = error.response?.data;
+            logger.error('Failed to list organizations', {
+                error: lrError?.Description || error.message,
+                errorCode: lrError?.ErrorCode,
+            });
+            throw new Error(lrError?.Description || 'Failed to list organizations');
+        }
+    }
+
+    /**
+     * Create a new organization
+     * POST /v2/manage/organizations
+     */
+    async createOrganization(name: string, metadata?: Record<string, any>): Promise<LROrganization> {
+        try {
+            const response = await this.client.post(
+                '/v2/manage/organizations',
+                { Name: name, ...(metadata || {}) },
+                { params: { apikey: this.apiKey, apisecret: this.apiSecret } }
+            );
+
+            logger.info('Organization created', { name, orgId: response.data?.Id });
+            return response.data;
+        } catch (error: any) {
+            const lrError = error.response?.data;
+            logger.error('Failed to create organization', {
+                error: lrError?.Description || error.message,
+                errorCode: lrError?.ErrorCode,
+            });
+            throw new Error(lrError?.Description || 'Failed to create organization');
+        }
+    }
+
+    /**
+     * Get organization details by ID
+     * GET /v2/manage/organizations/:orgId
+     */
+    async getOrganization(orgId: string): Promise<LROrganization> {
+        try {
+            const response = await this.client.get(`/v2/manage/organizations/${orgId}`, {
+                params: { apikey: this.apiKey, apisecret: this.apiSecret },
+            });
+
+            return response.data;
+        } catch (error: any) {
+            const lrError = error.response?.data;
+            logger.error('Failed to get organization', {
+                orgId,
+                error: lrError?.Description || error.message,
+            });
+            throw new Error(lrError?.Description || 'Failed to get organization');
+        }
+    }
+
+    /**
+     * Delete an organization
+     * DELETE /v2/manage/organizations/:orgId
+     */
+    async deleteOrganization(orgId: string): Promise<void> {
+        try {
+            await this.client.delete(`/v2/manage/organizations/${orgId}`, {
+                params: { apikey: this.apiKey, apisecret: this.apiSecret },
+            });
+
+            logger.info('Organization deleted', { orgId });
+        } catch (error: any) {
+            const lrError = error.response?.data;
+            logger.error('Failed to delete organization', {
+                orgId,
+                error: lrError?.Description || error.message,
+            });
+            throw new Error(lrError?.Description || 'Failed to delete organization');
+        }
+    }
+
+    /**
+     * Update organization details
+     * PUT /v2/manage/organizations/:orgId
+     */
+    async updateOrganization(orgId: string, data: { Name?: string;[key: string]: any }): Promise<LROrganization> {
+        try {
+            const response = await this.client.put(
+                `/v2/manage/organizations/${orgId}`,
+                data,
+                { params: { apikey: this.apiKey, apisecret: this.apiSecret } }
+            );
+
+            logger.info('Organization updated', { orgId });
+            return response.data;
+        } catch (error: any) {
+            const lrError = error.response?.data;
+            logger.error('Failed to update organization', {
+                orgId,
+                error: lrError?.Description || error.message,
+            });
+            throw new Error(lrError?.Description || 'Failed to update organization');
+        }
+    }
+
+    /**
+     * List roles for an organization
+     * GET /v2/manage/organizations/:orgId/roles
+     */
+    async getOrgRoles(orgId: string): Promise<LROrgRole[]> {
+        try {
+            const response = await this.client.get(`/v2/manage/organizations/${orgId}/roles`, {
+                params: { apikey: this.apiKey, apisecret: this.apiSecret },
+            });
+
+            return response.data?.Data || response.data || [];
+        } catch (error: any) {
+            const lrError = error.response?.data;
+            logger.warn('Failed to get org roles', { orgId, error: lrError?.Description || error.message });
+            return [];
+        }
+    }
+
+
+    /**
+     * Get user's organization context (all orgs + roles for a user)
+     * GET /v2/manage/account/:uid/orgcontext
+     */
+    async getUserOrgContext(uid: string): Promise<LRUserOrgContext[]> {
+        try {
+            const response = await this.client.get(`/v2/manage/account/${uid}/orgcontext`, {
+                params: { apikey: this.apiKey, apisecret: this.apiSecret },
+            });
+
+            let contexts: any[] = response.data?.Data || response.data || [];
+            if (!Array.isArray(contexts)) contexts = [];
+
+            // Normalize fields and ensure OrgName is present
+            const normalizedContexts = await Promise.all(contexts.map(async (ctx: any) => {
+                const normalized = {
+                    OrgId: ctx.OrgId,
+                    OrgName: ctx.OrgName || ctx.Name || null,
+                    Roles: ctx.Roles || [],
+                };
+
+                // If name is still missing, try to fetch it from org details
+                if (!normalized.OrgName && normalized.OrgId) {
+                    try {
+                        const org = await this.getOrganization(normalized.OrgId);
+                        normalized.OrgName = org.Name;
+                    } catch (e) {
+                        logger.warn(`Could not fetch name for org ${normalized.OrgId}`);
+                        normalized.OrgName = `Org ${normalized.OrgId.substring(0, 8)}`;
+                    }
+                }
+                return normalized;
+            }));
+
+            return normalizedContexts;
+        } catch (error: any) {
+            const lrError = error.response?.data;
+            logger.warn('Failed to get user org context', {
+                uid,
+                error: lrError?.Description || error.message,
+            });
+            return [];
+        }
+    }
+
 
     /**
      * Refresh an access token before it expires (legacy LR API)

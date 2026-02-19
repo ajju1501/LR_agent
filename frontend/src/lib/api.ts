@@ -8,6 +8,8 @@ import {
   LoginResponse,
   RegisterResponse,
   AuthUser,
+  Organization,
+  UserOrgContext,
 } from './types';
 
 class APIClient {
@@ -27,12 +29,17 @@ class APIClient {
       },
     });
 
-    // Add auth token to every request
+    // Add auth token and organization context to every request
     this.client.interceptors.request.use((cfg) => {
       if (typeof window !== 'undefined') {
         const token = localStorage.getItem('lr_access_token');
         if (token) {
           cfg.headers.Authorization = `Bearer ${token}`;
+        }
+
+        const orgId = localStorage.getItem('lr_current_org');
+        if (orgId) {
+          cfg.headers['x-organization-id'] = orgId;
         }
       }
       return cfg;
@@ -320,6 +327,49 @@ class APIClient {
 
   async deleteResourceItem(id: string): Promise<void> {
     await this.client.delete(`/api/documents/resources/${id}`);
+  }
+
+  // ──────────── Organization endpoints ────────────
+
+  async listOrganizations(): Promise<Organization[]> {
+    const response = await this.client.get<{ status: string; data: Organization[] }>('/api/orgs');
+    return response.data.data;
+  }
+
+  async createOrganization(name: string, metadata?: Record<string, any>): Promise<Organization> {
+    const response = await this.client.post<{ status: string; data: Organization }>('/api/orgs', { name, metadata });
+    return response.data.data;
+  }
+
+  async getOrganization(orgId: string): Promise<Organization> {
+    const response = await this.client.get<{ status: string; data: Organization }>(`/api/orgs/${orgId}`);
+    return response.data.data;
+  }
+
+  async updateOrganization(orgId: string, data: Record<string, any>): Promise<Organization> {
+    const response = await this.client.put<{ status: string; data: Organization }>(`/api/orgs/${orgId}`, data);
+    return response.data.data;
+  }
+
+  async deleteOrganization(orgId: string): Promise<void> {
+    await this.client.delete(`/api/orgs/${orgId}`);
+  }
+
+  async getMyOrganizations(): Promise<UserOrgContext[]> {
+    const response = await this.client.get<{ status: string; data: UserOrgContext[] }>('/api/orgs/my-orgs');
+    return response.data.data;
+  }
+
+  async getOrgRoles(orgId: string): Promise<any[]> {
+    const response = await this.client.get<{ status: string; data: any[] }>(`/api/orgs/${orgId}/roles`);
+    return response.data.data;
+  }
+
+
+
+  async getUserOrgContext(uid: string): Promise<UserOrgContext[]> {
+    const response = await this.client.get<{ status: string; data: UserOrgContext[] }>(`/api/orgs/user/${uid}/context`);
+    return response.data.data;
   }
 
   // ──────────── Health ────────────

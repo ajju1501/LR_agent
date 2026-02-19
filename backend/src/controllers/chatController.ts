@@ -1,11 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
+import { AuthenticatedRequest } from '../middleware/auth';
 import { sessionService } from '../services/sessionService';
 import { ragPipelineService } from '../services/ragPipelineService';
 import logger from '../utils/logger';
 
-export async function sendMessage(req: Request, res: Response, next: NextFunction) {
+export async function sendMessage(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   try {
     const { sessionId, message, userId } = req.body;
+    const orgId = req.user?.orgId;
 
     if (!sessionId || !message) {
       return res.status(400).json({
@@ -14,7 +16,7 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       });
     }
 
-    logger.info('Processing chat message', { sessionId, messageLength: message.length });
+    logger.info('Processing chat message', { sessionId, orgId, messageLength: message.length });
 
     try {
       // Get session and verify it exists
@@ -23,6 +25,14 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
         return res.status(404).json({
           status: 'error',
           message: 'Session not found',
+        });
+      }
+
+      // Verify session belongs to organization (if applicable)
+      if (orgId && session.orgId && session.orgId !== orgId && !req.user?.roles.includes('administrator')) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Unauthorized: Session belongs to a different organization',
         });
       }
 
@@ -37,6 +47,7 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
         query: message,
         conversationHistory: history,
         userId: userId || session.userId,
+        orgId: orgId
       });
 
       // Save assistant response
@@ -57,6 +68,7 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
         query: message,
         conversationHistory: [],
         userId: userId || 'guest',
+        orgId: orgId
       });
 
       res.json({
@@ -70,14 +82,15 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
   }
 }
 
-export async function createSession(req: Request, res: Response, next: NextFunction) {
+export async function createSession(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   try {
     const { userId, title } = req.body;
+    const orgId = req.user?.orgId;
 
-    logger.info('Creating new session', { userId });
+    logger.info('Creating new session', { userId, orgId });
 
     try {
-      const session = await sessionService.createSession(userId, title || 'New Chat');
+      const session = await sessionService.createSession(userId, title || 'New Chat', orgId);
 
       res.status(201).json({
         status: 'success',
@@ -90,6 +103,7 @@ export async function createSession(req: Request, res: Response, next: NextFunct
       const mockSession = {
         id: `session_${Date.now()}`,
         userId: userId || 'guest',
+        orgId: orgId,
         title: title || 'New Chat',
         createdAt: new Date(),
         archived: false,
@@ -135,15 +149,16 @@ export async function getChatHistory(req: Request, res: Response, next: NextFunc
   }
 }
 
-export async function getUserSessions(req: Request, res: Response, next: NextFunction) {
+export async function getUserSessions(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   try {
     const { userId } = req.query;
-    const defaultUserId = userId as string || 'guest';
+    const orgId = req.user?.orgId;
+    const defaultUserId = userId as string || req.user?.uid || 'guest';
 
-    logger.info('Getting user sessions', { userId: defaultUserId });
+    logger.info('Getting user sessions', { userId: defaultUserId, orgId });
 
     try {
-      const sessions = await sessionService.getUserSessions(defaultUserId);
+      const sessions = await sessionService.getUserSessions(defaultUserId, orgId);
       res.json({
         status: 'success',
         data: { sessions },

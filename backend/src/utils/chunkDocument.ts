@@ -109,12 +109,13 @@ export function chunkDocument(
 
   const chunks = createChunks(text, docId, chunkSize, overlap);
 
-  // Propagate metadata (heading, url, category) to all chunks
+  // Propagate metadata (heading, url, category, orgId) to all chunks
   if (metadata) {
     chunks.forEach(chunk => {
       if (metadata.heading) chunk.metadata.heading = metadata.heading;
       if (metadata.url) chunk.metadata.url = metadata.url;
       if (metadata.category) chunk.metadata.category = metadata.category;
+      if (metadata.orgId) chunk.metadata.orgId = metadata.orgId;
     });
   }
 

@@ -40,12 +40,21 @@ class SessionService {
         CREATE TABLE IF NOT EXISTS sessions (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           user_id VARCHAR(255),
+          org_id VARCHAR(255),
           title VARCHAR(500),
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           archived BOOLEAN DEFAULT FALSE
         )
       `);
+
+      // Migration: Add org_id column if it doesn't exist
+      try {
+        await this.pool.query('ALTER TABLE sessions ADD COLUMN IF NOT EXISTS org_id VARCHAR(255)');
+      } catch (err) {
+        // Ignore if error because column exists or IF NOT EXISTS not supported
+        logger.debug('Note: sessions.org_id column check complete');
+      }
 
       // Messages table
       await this.pool.query(`
@@ -63,6 +72,7 @@ class SessionService {
       await this.pool.query(`
         CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
         CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+        CREATE INDEX IF NOT EXISTS idx_sessions_org_id ON sessions(org_id);
         CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at);
       `);
 
@@ -73,21 +83,22 @@ class SessionService {
     }
   }
 
-  async createSession(userId?: string, title?: string): Promise<ChatSession> {
+  async createSession(userId?: string, title?: string, orgId?: string): Promise<ChatSession> {
     try {
       const result = await this.pool.query<any>(
-        `INSERT INTO sessions (user_id, title)
-         VALUES ($1, $2)
-         RETURNING id, user_id, title, created_at, updated_at, archived`,
-        [userId || null, title || 'New Chat']
+        `INSERT INTO sessions (user_id, title, org_id)
+         VALUES ($1, $2, $3)
+         RETURNING id, user_id, org_id, title, created_at, updated_at, archived`,
+        [userId || null, title || 'New Chat', orgId || null]
       );
 
       const session = result.rows[0];
-      logger.info('Session created', { sessionId: session.id, userId });
+      logger.info('Session created', { sessionId: session.id, userId, orgId });
 
       return {
         id: session.id,
         userId: session.user_id,
+        orgId: session.org_id,
         title: session.title,
         createdAt: session.created_at,
         archived: session.archived,
@@ -101,7 +112,7 @@ class SessionService {
   async getSession(sessionId: string): Promise<ChatSession | null> {
     try {
       const result = await this.pool.query<any>(
-        `SELECT id, user_id, title, created_at, updated_at, archived
+        `SELECT id, user_id, org_id, title, created_at, updated_at, archived
          FROM sessions WHERE id = $1`,
         [sessionId]
       );
@@ -114,6 +125,7 @@ class SessionService {
       return {
         id: row.id,
         userId: row.user_id,
+        orgId: row.org_id,
         title: row.title,
         createdAt: row.created_at,
         archived: row.archived,
@@ -124,23 +136,33 @@ class SessionService {
     }
   }
 
-  async getUserSessions(userId: string): Promise<ChatSession[]> {
+  async getUserSessions(userId: string, orgId?: string): Promise<ChatSession[]> {
     try {
-      const result = await this.pool.query<any>(
-        `SELECT id, user_id, title, created_at, updated_at, archived
-         FROM sessions WHERE user_id = $1 ORDER BY created_at DESC`,
-        [userId]
-      );
+      let query = `SELECT id, user_id, org_id, title, created_at, updated_at, archived
+                   FROM sessions WHERE user_id = $1`;
+      const params: any[] = [userId];
+
+      if (orgId) {
+        query += ` AND org_id = $2`;
+        params.push(orgId);
+      } else {
+        query += ` AND org_id IS NULL`;
+      }
+
+      query += ` ORDER BY created_at DESC`;
+
+      const result = await this.pool.query<any>(query, params);
 
       return result.rows.map(row => ({
         id: row.id,
         userId: row.user_id,
+        orgId: row.org_id,
         title: row.title,
         createdAt: row.created_at,
         archived: row.archived,
       }));
     } catch (error) {
-      logger.error('Failed to get user sessions', { error: String(error), userId });
+      logger.error('Failed to get user sessions', { error: String(error), userId, orgId });
       throw error;
     }
   }

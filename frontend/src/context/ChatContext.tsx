@@ -1,8 +1,9 @@
 'use client'
 
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react'
+import { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react'
 import { ChatSession, Message } from '@/lib/types'
 import { apiClient } from '@/lib/api'
+import { useOrg } from './OrgContext'
 
 interface ChatContextType {
   currentSessionId: string | null
@@ -21,11 +22,14 @@ interface ChatContextType {
 const ChatContext = createContext<ChatContextType | undefined>(undefined)
 
 export function ChatProvider({ children }: { children: ReactNode }) {
+  const { currentOrg } = useOrg()
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sessions, setSessions] = useState<ChatSession[]>([])
+
+
 
   const createSession = useCallback(async () => {
     try {
@@ -144,6 +148,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const clearError = useCallback(() => {
     setError(null)
   }, [])
+
+  // Clear and reload chat state when organization changes
+  useEffect(() => {
+    setCurrentSessionId(null)
+    setMessages([])
+    setSessions([]) // Clear sessions immediately
+    loadSessions()
+  }, [currentOrg?.OrgId, loadSessions])
 
   return (
     <ChatContext.Provider

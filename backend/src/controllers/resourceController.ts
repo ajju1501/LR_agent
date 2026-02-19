@@ -35,7 +35,8 @@ export async function uploadPDF(req: AuthenticatedRequest, res: Response, next: 
         const resource = await resourceService.processPDF(
             file.buffer,
             file.originalname,
-            req.user?.uid || 'unknown'
+            req.user?.uid || 'unknown',
+            req.user?.orgId
         );
 
         res.status(201).json({
@@ -77,11 +78,13 @@ export async function ingestGitHubRepo(req: AuthenticatedRequest, res: Response,
         logger.info('GitHub repo ingestion requested', {
             repoUrl,
             requestedBy: req.user?.uid,
+            orgId: req.user?.orgId
         });
 
         const resource = await resourceService.processGitHubRepo(
             repoUrl,
-            req.user?.uid || 'unknown'
+            req.user?.uid || 'unknown',
+            req.user?.orgId
         );
 
         res.status(201).json({
@@ -101,9 +104,9 @@ export async function ingestGitHubRepo(req: AuthenticatedRequest, res: Response,
  * GET /api/documents/resources
  * List all uploaded resources (PDFs and GitHub repos)
  */
-export async function listResources(req: Request, res: Response, next: NextFunction) {
+export async function listResources(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-        const resources = await resourceService.listResources();
+        const resources = await resourceService.listResources(req.user?.orgId);
 
         res.json({
             status: 'success',

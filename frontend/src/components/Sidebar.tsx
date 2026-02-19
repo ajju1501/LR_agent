@@ -1,16 +1,30 @@
 'use client'
 
 import { useChat } from '@/context/ChatContext'
+import { useOrg } from '@/context/OrgContext'
+import { useAuth } from '@/context/AuthContext'
 import { useEffect, useState } from 'react'
-import { Plus, Trash2, Menu, LogOut } from 'lucide-react'
+import { Plus, Trash2, Menu, LogOut, Building2, ChevronDown } from 'lucide-react'
 
 export default function Sidebar() {
-  const { sessions, currentSessionId, createSession, deleteSession, loadHistory, loadSessions } = useChat()
+  const { user, logout } = useAuth()
+  const { sessions, currentSessionId, createSession, deleteSession, loadHistory } = useChat()
+  const { organizations, allOrganizations, currentOrg, switchOrg, loadAllOrgs, loadMyOrgs } = useOrg()
   const [open, setOpen] = useState(true)
+  const [showOrgDropdown, setShowOrgDropdown] = useState(false)
+
+  const isAdmin = user?.roles.includes('administrator')
+
+  // Use allOrganizations for admins, otherwise just the memberships
+  const displayOrgs = isAdmin ? allOrganizations.map(o => ({ OrgId: o.Id, OrgName: o.Name })) : organizations
 
   useEffect(() => {
-    loadSessions()
-  }, [])
+    if (isAdmin) {
+      loadAllOrgs()
+    } else {
+      loadMyOrgs()
+    }
+  }, [isAdmin, currentOrg?.OrgId, loadAllOrgs, loadMyOrgs])
 
   const handleNewChat = async () => {
     await createSession()
@@ -28,23 +42,12 @@ export default function Sidebar() {
   }
 
   const handleLogout = () => {
-    localStorage.removeItem('lr_access_token')
-    localStorage.removeItem('lr_refresh_token')
-    localStorage.removeItem('lr_user')
-    window.location.href = '/login'
+    logout()
   }
 
-  // Try to get user info from localStorage
-  let userName = 'User'
-  let userRole = []
-  try {
-    const stored = localStorage.getItem('lr_user')
-    if (stored) {
-      const parsed = JSON.parse(stored)
-      userName = parsed.fullName || parsed.email || 'User'
-      userRole = parsed.roles || []
-    }
-  } catch { }
+  // Display user info
+  const userName = user?.fullName || user?.email || 'User'
+  const userRoles = user?.roles || []
 
   return (
     <>
@@ -53,7 +56,7 @@ export default function Sidebar() {
         onClick={() => setOpen(!open)}
         className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-white rounded-lg shadow-md"
       >
-        <Menu className="w-5 h-5" />
+        <Menu className="w-5 h-5 text-gray-900" />
       </button>
 
       {/* Sidebar */}
@@ -62,7 +65,7 @@ export default function Sidebar() {
           } lg:translate-x-0 transition-transform fixed lg:static inset-y-0 left-0 w-64 bg-gray-900 text-white flex flex-col z-40`}
       >
         {/* Header */}
-        <div className="p-4 border-b border-gray-700">
+        <div className="p-4 border-b border-gray-700 space-y-4">
           <button
             onClick={handleNewChat}
             className="w-full flex items-center justify-center gap-2 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition-colors font-medium text-sm"
@@ -70,6 +73,53 @@ export default function Sidebar() {
             <Plus className="w-4 h-4" />
             New Chat
           </button>
+
+          {/* Organization Switcher */}
+          {(displayOrgs.length > 0 || isAdmin) && (
+            <div className="relative">
+              <button
+                onClick={() => setShowOrgDropdown(!showOrgDropdown)}
+                className="w-full flex items-center justify-between gap-2 bg-gray-800/50 hover:bg-gray-800 border border-gray-700 text-gray-200 px-3 py-2 rounded-lg transition-all text-xs font-medium"
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <Building2 className="w-3.5 h-3.5 text-blue-400" />
+                  <span className="truncate">{currentOrg?.OrgName || 'Select Organization'}</span>
+                </div>
+                <ChevronDown className={`w-3 h-3 transition-transform ${showOrgDropdown ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showOrgDropdown && (
+                <div className="absolute top-full left-0 w-full mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 max-h-48 overflow-y-auto">
+                  {displayOrgs.length === 0 && (
+                    <div className="px-3 py-2 text-[10px] text-gray-500 italic">No organizations available</div>
+                  )}
+                  {displayOrgs.map(org => (
+                    <button
+                      key={org.OrgId}
+                      onClick={() => {
+                        switchOrg(org.OrgId)
+                        setShowOrgDropdown(false)
+                      }}
+                      className={`w-full text-left px-3 py-2 text-xs transition-colors hover:bg-gray-700 ${currentOrg?.OrgId === org.OrgId ? 'text-blue-400 bg-gray-700/50' : 'text-gray-300'
+                        }`}
+                    >
+                      {org.OrgName}
+                    </button>
+                  ))}
+                  {isAdmin && (
+                    <div className="border-t border-gray-700 mt-1 p-2">
+                      <button
+                        onClick={() => window.location.href = '/admin'}
+                        className="w-full text-[10px] text-blue-400 hover:underline text-left"
+                      >
+                        Manage Organizations →
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Chat History */}
@@ -114,9 +164,9 @@ export default function Sidebar() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm text-white truncate">{userName}</p>
-              {userRole && (
-                userRole.map((role: string) => (
-                  <p className="text-xs text-gray-400 capitalize">{role}</p>
+              {userRoles && (
+                userRoles.map((role: string) => (
+                  <p key={role} className="text-[10px] text-gray-400 capitalize bg-gray-800 px-1.5 py-0.5 rounded inline-block mr-1 mb-1">{role}</p>
                 ))
               )}
             </div>

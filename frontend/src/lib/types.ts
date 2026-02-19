@@ -98,3 +98,22 @@ export interface ChatContextType {
   loadSessions: () => Promise<void>;
   clearError: () => void;
 }
+
+// ──────────── Organization Types ────────────
+
+export interface Organization {
+  Id: string;
+  Name: string;
+  Status?: string;
+  CreatedDate?: string;
+  ModifiedDate?: string;
+  [key: string]: any;
+}
+
+export interface UserOrgContext {
+  OrgId: string;
+  OrgName?: string;
+  Roles?: string[];
+  [key: string]: any;
+}
+

@@ -11,6 +11,7 @@ interface RAGPipelineInput {
   query: string;
   conversationHistory: Message[];
   userId?: string;
+  orgId?: string;
 }
 
 class RAGPipelineService {
@@ -27,6 +28,7 @@ class RAGPipelineService {
       try {
         retrievalResult = await retrievalService.retrieveContext(
           input.query,
+          input.orgId,
           config.rag.retrievalTopK
         );
       } catch (retrievalError) {

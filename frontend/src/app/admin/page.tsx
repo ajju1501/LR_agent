@@ -9,12 +9,19 @@ import { apiClient } from '@/lib/api'
 import {
     Shield, MessageSquare, FolderOpen, Users, Settings,
     LogOut, Globe, Loader2, CheckCircle, AlertCircle,
-    Database, FileText, UserPlus, Upload, Github, Trash2
+    Database, FileText, UserPlus, Upload, Github, Trash2,
+    Building2, Plus, ChevronDown
 } from 'lucide-react'
+import { useOrg } from '@/context/OrgContext'
 
 function AdminPage() {
     const { user, logout } = useAuth()
-    const [activeTab, setActiveTab] = useState<'chat' | 'documents' | 'users'>('chat')
+    const { currentOrg, switchOrg, allOrganizations, loadAllOrgs } = useOrg()
+    const [activeTab, setActiveTab] = useState<'chat' | 'documents' | 'users' | 'organizations'>('organizations')
+
+    useEffect(() => {
+        loadAllOrgs()
+    }, [loadAllOrgs])
 
     return (
         <div className="h-screen flex bg-slate-950">
@@ -33,9 +40,30 @@ function AdminPage() {
                     </div>
                 </div>
 
+                {/* Organization Selection */}
+                <div className="px-5 py-4 border-b border-white/5">
+                    <label className="block text-[10px] text-purple-300/40 uppercase tracking-widest font-bold mb-2">Active Context</label>
+                    <div className="relative">
+                        <select
+                            value={currentOrg?.OrgId || ''}
+                            onChange={(e) => switchOrg(e.target.value)}
+                            className="w-full bg-slate-900/50 border border-white/10 rounded-lg px-3 py-2 text-xs text-white appearance-none cursor-pointer focus:ring-1 focus:ring-purple-500/50 outline-none"
+                        >
+                            <option value="" className="bg-slate-900">Global (No Org)</option>
+                            {allOrganizations.map(org => (
+                                <option key={org.Id} value={org.Id} className="bg-slate-900">
+                                    {org.Name}
+                                </option>
+                            ))}
+                        </select>
+                        <ChevronDown className="absolute right-2 top-2.5 w-3.5 h-3.5 text-purple-300/40 pointer-events-none" />
+                    </div>
+                </div>
+
                 {/* Nav */}
                 <nav className="flex-1 p-3 space-y-1">
                     {[
+                        { id: 'organizations', label: 'Organizations', icon: Building2 },
                         { id: 'chat', label: 'Chatbot', icon: MessageSquare },
                         { id: 'documents', label: 'Documents', icon: FolderOpen },
                         { id: 'users', label: 'User Management', icon: Users },
@@ -85,6 +113,7 @@ function AdminPage() {
 
                 {activeTab === 'documents' && <DocumentsPanel />}
                 {activeTab === 'users' && <UsersPanel />}
+                {activeTab === 'organizations' && <OrganizationsPanel />}
             </main>
         </div>
     )
@@ -92,6 +121,7 @@ function AdminPage() {
 
 /* ─────────── Documents Panel ─────────── */
 function DocumentsPanel() {
+    const { currentOrg } = useOrg()
     const [stats, setStats] = useState<any>(null)
     const [resources, setResources] = useState<any[]>([])
     const [scraping, setScraping] = useState(false)
@@ -109,7 +139,7 @@ function DocumentsPanel() {
     useEffect(() => {
         loadStats()
         loadResources()
-    }, [])
+    }, [currentOrg?.OrgId])
 
     const loadStats = async () => {
         try {
@@ -218,8 +248,12 @@ function DocumentsPanel() {
     return (
         <div className="flex-1 p-8 overflow-y-auto bg-gradient-to-b from-slate-950 to-slate-900">
             <div className="max-w-4xl mx-auto">
-                <h2 className="text-2xl font-bold text-white mb-2">Knowledge Base</h2>
-                <p className="text-purple-200/50 text-sm mb-8">Upload PDFs, add GitHub repos, or scrape docs to enrich the chatbot&apos;s knowledge</p>
+                <div className="mb-8 border-b border-white/5 pb-6">
+                    <h2 className="text-2xl font-bold text-white mb-2">Knowledge Base</h2>
+                    <p className="text-purple-200/50 text-sm">
+                        Manage documents for <span className="text-purple-300 font-bold">{currentOrg?.OrgName || 'Global Context'}</span>
+                    </p>
+                </div>
 
                 {/* Global status messages */}
                 {success && (
@@ -545,7 +579,7 @@ function UsersPanel() {
                             <select
                                 value={selectedRole}
                                 onChange={(e) => setSelectedRole(e.target.value)}
-                                className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-400/50 transition-all appearance-none"
+                                className="w-full px-4 py-2.5 bg-slate-900/50 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-400/50 transition-all appearance-none"
                             >
                                 <option value="administrator" className="bg-slate-900">Administrator</option>
                                 <option value="user" className="bg-slate-900">User</option>
@@ -585,6 +619,148 @@ function UsersPanel() {
                         </div>
                     )}
                 </div>
+            </div>
+        </div>
+    )
+}
+
+/* ─────────── Organizations Panel ─────────── */
+function OrganizationsPanel() {
+    const { allOrganizations, loadAllOrgs, createOrg, deleteOrg } = useOrg()
+    const [newOrgName, setNewOrgName] = useState('')
+    const [loading, setLoading] = useState(false)
+    const [error, setError] = useState<string | null>(null)
+    const [success, setSuccess] = useState<string | null>(null)
+
+    useEffect(() => {
+        loadAllOrgs()
+    }, [loadAllOrgs])
+
+
+    const handleCreateOrg = async () => {
+        if (!newOrgName.trim()) return
+        try {
+            setLoading(true)
+            setError(null)
+            await createOrg(newOrgName.trim())
+            setSuccess(`Organization "${newOrgName}" created`)
+            setNewOrgName('')
+        } catch (err: any) {
+            setError(err.message || 'Failed to create organization')
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const handleDeleteOrg = async (id: string, name: string) => {
+        if (!window.confirm(`Are you sure you want to delete organization "${name}"?`)) return
+        try {
+            setLoading(true)
+            await deleteOrg(id)
+            setSuccess(`Organization "${name}" deleted`)
+        } catch (err: any) {
+            setError(err.message || 'Failed to delete organization')
+        } finally {
+            setLoading(false)
+        }
+    }
+
+
+    return (
+        <div className="flex-1 p-8 overflow-y-auto bg-gradient-to-b from-slate-950 to-slate-900">
+            <div className="max-w-4xl mx-auto">
+                <header className="mb-8">
+                    <h2 className="text-2xl font-bold text-white mb-2">Organizations</h2>
+                    <p className="text-purple-200/50 text-sm">Manage multi-tenant organizations and their members using LoginRadius Organization APIs</p>
+                </header>
+
+                {success && (
+                    <div className="mb-6 p-4 bg-green-500/10 border border-green-500/20 rounded-lg flex items-center gap-2">
+                        <CheckCircle className="w-4 h-4 text-green-400" />
+                        <p className="text-green-300 text-sm">{success}</p>
+                        <button onClick={() => setSuccess(null)} className="ml-auto text-green-300/50 hover:text-green-300 text-xs">✕</button>
+                    </div>
+                )}
+                {error && (
+                    <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-red-400" />
+                        <p className="text-red-300 text-sm">{error}</p>
+                        <button onClick={() => setError(null)} className="ml-auto text-red-300/50 hover:text-red-300 text-xs">✕</button>
+                    </div>
+                )}
+
+                <div className="grid grid-cols-1 gap-6 mb-8">
+                    {/* Create Organization */}
+                    <section className="bg-white/5 border border-white/10 rounded-xl p-6">
+                        <h3 className="text-base font-semibold text-white mb-4 flex items-center gap-2">
+                            <Plus className="w-4 h-4 text-purple-400" />
+                            Create Organization
+                        </h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-xs text-purple-200/50 uppercase tracking-wider mb-1.5 font-medium">Org Name</label>
+                                <input
+                                    type="text"
+                                    value={newOrgName}
+                                    onChange={(e) => setNewOrgName(e.target.value)}
+                                    placeholder="e.g. Acme Corp"
+                                    className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-purple-300/30 focus:outline-none focus:ring-2 focus:ring-purple-400/50 transition-all"
+                                />
+                            </div>
+                            <button
+                                onClick={handleCreateOrg}
+                                disabled={loading || !newOrgName.trim()}
+                                className="w-full flex items-center justify-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 text-white font-medium rounded-lg transition-all text-sm"
+                            >
+                                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Building2 className="w-4 h-4" />}
+                                Create Org
+                            </button>
+                        </div>
+                    </section>
+
+                </div>
+
+                {/* Org List */}
+                <section className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
+                    <div className="px-6 py-4 border-b border-white/10 bg-white/[0.02]">
+                        <h3 className="text-base font-semibold text-white">Existing Organizations</h3>
+                    </div>
+                    <div className="divide-y divide-white/5">
+                        {allOrganizations.length === 0 ? (
+                            <div className="p-12 text-center">
+                                <Building2 className="w-12 h-12 text-purple-300/20 mx-auto mb-4" />
+                                <p className="text-purple-200/40 text-sm italic">No organizations found</p>
+                            </div>
+                        ) : (
+                            allOrganizations.map(org => (
+                                <div key={org.Id} className="px-6 py-4 flex items-center justify-between hover:bg-white/[0.02] transition-colors group">
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-10 h-10 bg-purple-500/10 border border-purple-500/20 rounded-lg flex items-center justify-center">
+                                            <Building2 className="w-5 h-5 text-purple-400" />
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-semibold text-white">{org.Name}</p>
+                                            <p className="text-xs text-purple-200/30 font-mono">ID: {org.Id}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="text-right mr-4">
+                                            <span className="inline-block px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 text-[10px] font-bold uppercase tracking-wider">
+                                                Active
+                                            </span>
+                                        </div>
+                                        <button
+                                            onClick={() => handleDeleteOrg(org.Id, org.Name)}
+                                            className="p-2 text-purple-200/20 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </section>
             </div>
         </div>
     )

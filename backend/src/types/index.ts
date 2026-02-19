@@ -12,6 +12,7 @@ export interface Message {
 export interface ChatSession {
   id: string;
   userId?: string;
+  orgId?: string;
   createdAt: Date;
   updatedAt?: Date;
   title?: string;
@@ -36,6 +37,7 @@ export interface DocumentMetadata {
   url?: string;
   lastUpdated?: Date;
   author?: string;
+  orgId?: string;
 }
 
 export interface DocumentChunk {
@@ -50,6 +52,7 @@ export interface DocumentChunk {
     heading?: string;
     url?: string;
     category?: string;
+    orgId?: string;
   };
 }
 
