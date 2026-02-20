@@ -43,10 +43,26 @@ class RAGPipelineService {
 
       // Step 2: Build prompt with context
       const promptStart = Date.now();
+
+      let basePrompt: string | undefined = undefined;
+      if (input.orgId) {
+        try {
+          const { loginRadiusService } = await import('./loginRadiusService');
+          const orgDetails = await loginRadiusService.getOrganization(input.orgId);
+          if (orgDetails && (orgDetails as any).Metadata?.BasePrompt) {
+            basePrompt = (orgDetails as any).Metadata.BasePrompt;
+            logger.info('Using organization-specific base prompt', { orgId: input.orgId, promptLength: basePrompt!.length });
+          }
+        } catch (orgError) {
+          logger.warn('Failed to fetch org details for prompt', { orgId: input.orgId, error: String(orgError) });
+        }
+      }
+
       let prompt = buildRAGPrompt({
         query: input.query,
         retrievedDocuments: retrievalResult.chunks,
         conversationHistory: input.conversationHistory,
+        basePrompt: basePrompt,
       });
 
       // Ensure prompt doesn't exceed token limits

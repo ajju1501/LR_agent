@@ -1,0 +1,15 @@
+Write a Google Research-style systems paper about MCP (Model Context Protocol), a standardized protocol for connecting LLMs to external tools.
+
+Include:
+- Abstract
+- Introduction with contributions
+- Architecture
+- Safety and consistency model
+- Performance evaluation
+- Related work
+- Conclusion
+
+Formal academic tone.
+Deep technical detail.
+~2000 words.
+No marketing language.

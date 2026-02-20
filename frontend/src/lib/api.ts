@@ -337,8 +337,8 @@ class APIClient {
     return response.data.data;
   }
 
-  async createOrganization(name: string, metadata?: Record<string, any>): Promise<Organization> {
-    const response = await this.client.post<{ status: string; data: Organization }>('/api/orgs', { name, metadata });
+  async createOrganization(name: string, basePrompt?: string, metadata?: Record<string, any>): Promise<Organization> {
+    const response = await this.client.post<{ status: string; data: Organization }>('/api/orgs', { name, basePrompt, metadata });
     return response.data.data;
   }
 

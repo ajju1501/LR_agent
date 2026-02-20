@@ -4,6 +4,7 @@ import logger from './utils/logger';
 import { userService } from './services/userService';
 import { sessionService } from './services/sessionService';
 import { resourceService } from './services/resourceService';
+import { ragPipelineService } from './services/ragPipelineService';
 
 const app = createApp();
 
@@ -26,6 +27,10 @@ const server = app.listen(PORT, async () => {
     await userService.initialize();
     await sessionService.initialize();
     await resourceService.initialize();
+
+    // Warm up and test RAG pipeline
+    await ragPipelineService.warmUp();
+
     logger.info('Database services initialized successfully');
   } catch (error) {
     logger.error('Database initialization failed', { error: String(error) });

@@ -31,13 +31,18 @@ export async function listOrganizations(req: AuthenticatedRequest, res: Response
  */
 export async function createOrganization(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-        const { name, metadata } = req.body;
+        const { name, metadata, basePrompt } = req.body;
 
         if (!name) {
             return res.status(400).json({ status: 'error', message: 'Organization name is required' });
         }
 
-        const org = await loginRadiusService.createOrganization(name, metadata);
+        const orgMetadata = {
+            ...(metadata || {}),
+            BasePrompt: basePrompt
+        };
+
+        const org = await loginRadiusService.createOrganization(name, orgMetadata);
 
         res.status(201).json({
             status: 'success',
@@ -46,6 +51,37 @@ export async function createOrganization(req: AuthenticatedRequest, res: Respons
         });
     } catch (error: any) {
         logger.error('Failed to create organization', { error: error.message });
+        res.status(500).json({ status: 'error', message: error.message });
+    }
+}
+
+/**
+ * PUT /api/orgs/:orgId
+ * Update organization details (admin only)
+ */
+export async function updateOrganization(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+        const { orgId } = req.params;
+        const { name, basePrompt, ...metadata } = req.body;
+
+        if (!orgId) {
+            return res.status(400).json({ status: 'error', message: 'Organization ID is required' });
+        }
+
+        const updateData: any = {};
+
+        if (name) updateData.Name = name;
+        if (basePrompt !== undefined) updateData.Metadata = { BasePrompt: basePrompt };
+
+        const org = await loginRadiusService.updateOrganization(orgId, updateData);
+
+        res.json({
+            status: 'success',
+            data: org,
+            message: 'Organization updated successfully',
+        });
+    } catch (error: any) {
+        logger.error('Failed to update organization', { orgId: req.params.orgId, error: error.message });
         res.status(500).json({ status: 'error', message: error.message });
     }
 }
@@ -69,31 +105,7 @@ export async function getOrganization(req: AuthenticatedRequest, res: Response, 
     }
 }
 
-/**
- * PUT /api/orgs/:orgId
- * Update organization details (admin only)
- */
-export async function updateOrganization(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-    try {
-        const { orgId } = req.params;
-        const updateData = req.body;
 
-        if (!updateData || Object.keys(updateData).length === 0) {
-            return res.status(400).json({ status: 'error', message: 'Update data is required' });
-        }
-
-        const org = await loginRadiusService.updateOrganization(orgId, updateData);
-
-        res.json({
-            status: 'success',
-            data: org,
-            message: 'Organization updated successfully',
-        });
-    } catch (error: any) {
-        logger.error('Failed to update organization', { orgId: req.params.orgId, error: error.message });
-        res.status(500).json({ status: 'error', message: error.message });
-    }
-}
 
 /**
  * DELETE /api/orgs/:orgId

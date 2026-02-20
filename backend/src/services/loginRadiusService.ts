@@ -618,7 +618,7 @@ class LoginRadiusService {
         try {
             const response = await this.client.post(
                 '/v2/manage/organizations',
-                { Name: name, ...(metadata || {}) },
+                { Name: name, ...(metadata ? { Metadata: metadata } : {}) },
                 { params: { apikey: this.apiKey, apisecret: this.apiSecret } }
             );
 

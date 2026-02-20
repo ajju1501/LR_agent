@@ -18,7 +18,8 @@ interface OrgContextType {
     switchOrgRole: (role: UserRole) => void
     loadMyOrgs: () => Promise<void>
     loadAllOrgs: () => Promise<void>
-    createOrg: (name: string) => Promise<void>
+    createOrg: (name: string, basePrompt?: string) => Promise<void>
+    updateOrg: (orgId: string, name: string, basePrompt: string) => Promise<void>
     deleteOrg: (orgId: string) => Promise<void>
     clearError: () => void
 }
@@ -186,11 +187,11 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     }, [availableOrgRoles, isTenantAdmin])
 
     // Create a new organization
-    const createOrg = useCallback(async (name: string) => {
+    const createOrg = useCallback(async (name: string, basePrompt?: string) => {
         try {
             setIsLoading(true)
             setError(null)
-            await apiClient.createOrganization(name)
+            await apiClient.createOrganization(name, basePrompt)
             // Refresh lists
             await loadAllOrgs()
         } catch (err: any) {
@@ -200,6 +201,26 @@ export function OrgProvider({ children }: { children: ReactNode }) {
             setIsLoading(false)
         }
     }, [loadAllOrgs])
+
+    // Update an organization
+    const updateOrg = useCallback(async (orgId: string, name: string, basePrompt: string) => {
+        try {
+            setIsLoading(true)
+            setError(null)
+            await apiClient.updateOrganization(orgId, { name, basePrompt })
+            // Refresh lists
+            await loadAllOrgs()
+            // If the updated org is the current one, update it too
+            if (currentOrg?.OrgId === orgId) {
+                setCurrentOrg(prev => prev ? { ...prev, OrgName: name } : null)
+            }
+        } catch (err: any) {
+            setError(err.message || 'Failed to update organization')
+            throw err
+        } finally {
+            setIsLoading(false)
+        }
+    }, [loadAllOrgs, currentOrg])
 
     // Delete an organization
     const deleteOrg = useCallback(async (orgId: string) => {
@@ -249,6 +270,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
                 loadMyOrgs,
                 loadAllOrgs,
                 createOrg,
+                updateOrg,
                 deleteOrg,
                 clearError,
             }}

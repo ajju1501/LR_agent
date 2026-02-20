@@ -143,7 +143,7 @@ class HuggingFaceClient {
             const response = await this.withRetry(
                 async () => {
                     const embeddingModel = config.huggingface.embeddingModel;
-                    const res = await fetch(`https://router.huggingface.co/hf-inference/models/${embeddingModel}`, {
+                    const res = await fetch(`https://router.huggingface.co/hf-inference/models/${embeddingModel}/pipeline/feature-extraction`, {
                         headers: {
                             Authorization: `Bearer ${this.token}`,
                             'Content-Type': 'application/json',

@@ -12,7 +12,7 @@ import {
     Shield, MessageSquare, FolderOpen, Users, Settings,
     LogOut, Globe, Loader2, CheckCircle, AlertCircle,
     Database, FileText, UserPlus, Upload, Github, Trash2,
-    Building2, Plus, ChevronDown, Eye, Lock, Crown
+    Building2, Plus, ChevronDown, Eye, Lock, Crown, Edit3
 } from 'lucide-react'
 import { useOrg } from '@/context/OrgContext'
 
@@ -809,8 +809,14 @@ function UsersPanel() {
 
 /* ─────────── Organizations Panel ─────────── */
 function OrganizationsPanel() {
-    const { allOrganizations, loadAllOrgs, createOrg, deleteOrg } = useOrg()
+    const { allOrganizations, loadAllOrgs, createOrg, updateOrg, deleteOrg } = useOrg()
     const [newOrgName, setNewOrgName] = useState('')
+    const [newOrgPrompt, setNewOrgPrompt] = useState('')
+
+    const [editingOrgId, setEditingOrgId] = useState<string | null>(null)
+    const [editName, setEditName] = useState('')
+    const [editPrompt, setEditPrompt] = useState('')
+
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [success, setSuccess] = useState<string | null>(null)
@@ -825,14 +831,36 @@ function OrganizationsPanel() {
         try {
             setLoading(true)
             setError(null)
-            await createOrg(newOrgName.trim())
+            await createOrg(newOrgName.trim(), newOrgPrompt.trim())
             setSuccess(`Organization "${newOrgName}" created`)
             setNewOrgName('')
+            setNewOrgPrompt('')
         } catch (err: any) {
             setError(err.message || 'Failed to create organization')
         } finally {
             setLoading(false)
         }
+    }
+
+    const handleUpdateOrg = async () => {
+        if (!editingOrgId || !editName.trim()) return
+        try {
+            setLoading(true)
+            setError(null)
+            await updateOrg(editingOrgId, editName.trim(), editPrompt.trim())
+            setSuccess(`Organization "${editName}" updated`)
+            setEditingOrgId(null)
+        } catch (err: any) {
+            setError(err.message || 'Failed to update organization')
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const startEditing = (org: any) => {
+        setEditingOrgId(org.Id)
+        setEditName(org.Name)
+        setEditPrompt(org.Metadata?.BasePrompt || '')
     }
 
     const handleDeleteOrg = async (id: string, name: string) => {
@@ -887,8 +915,19 @@ function OrganizationsPanel() {
                                     value={newOrgName}
                                     onChange={(e) => setNewOrgName(e.target.value)}
                                     placeholder="e.g. Acme Corp"
-                                    className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-purple-300/30 focus:outline-none focus:ring-2 focus:ring-purple-400/50 transition-all"
+                                    className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-purple-300/30 focus:outline-none focus:ring-2 focus:ring-purple-400/50 transition-all font-sans"
                                 />
+                            </div>
+                            <div>
+                                <label className="block text-xs text-purple-200/50 uppercase tracking-wider mb-1.5 font-medium">Base Prompt (Optional)</label>
+                                <textarea
+                                    value={newOrgPrompt}
+                                    onChange={(e) => setNewOrgPrompt(e.target.value)}
+                                    placeholder="Define how the AI should behave for this organization..."
+                                    rows={3}
+                                    className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-purple-300/30 focus:outline-none focus:ring-2 focus:ring-purple-400/50 transition-all font-sans resize-none"
+                                />
+                                <p className="mt-1.5 text-[10px] text-purple-200/30">This prompt override the default AI behavior for this org's users.</p>
                             </div>
                             <button
                                 onClick={handleCreateOrg}
@@ -916,29 +955,85 @@ function OrganizationsPanel() {
                             </div>
                         ) : (
                             allOrganizations.map(org => (
-                                <div key={org.Id} className="px-6 py-4 flex items-center justify-between hover:bg-white/[0.02] transition-colors group">
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-10 h-10 bg-purple-500/10 border border-purple-500/20 rounded-lg flex items-center justify-center">
-                                            <Building2 className="w-5 h-5 text-purple-400" />
+                                <div key={org.Id} className="px-6 py-4 border-b border-white/5 hover:bg-white/[0.02] transition-colors group last:border-0">
+                                    {editingOrgId === org.Id ? (
+                                        <div className="space-y-4 py-2">
+                                            <div className="grid grid-cols-1 gap-4">
+                                                <div>
+                                                    <label className="block text-[10px] text-purple-200/50 uppercase mb-1">Name</label>
+                                                    <input
+                                                        type="text"
+                                                        value={editName}
+                                                        onChange={(e) => setEditName(e.target.value)}
+                                                        className="w-full px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:ring-1 focus:ring-purple-500"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[10px] text-purple-200/50 uppercase mb-1">Base Prompt</label>
+                                                    <textarea
+                                                        value={editPrompt}
+                                                        onChange={(e) => setEditPrompt(e.target.value)}
+                                                        className="w-full px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:ring-1 focus:ring-purple-500 resize-none"
+                                                        rows={4}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="flex justify-end gap-2">
+                                                <button
+                                                    onClick={() => setEditingOrgId(null)}
+                                                    className="px-3 py-1.5 text-xs text-white/50 hover:text-white transition-colors"
+                                                >
+                                                    Cancel
+                                                </button>
+                                                <button
+                                                    onClick={handleUpdateOrg}
+                                                    disabled={loading || !editName.trim()}
+                                                    className="px-4 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-2"
+                                                >
+                                                    {loading && <Loader2 className="w-3 h-3 animate-spin" />}
+                                                    Save Changes
+                                                </button>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <p className="text-sm font-semibold text-white">{org.Name}</p>
-                                            <p className="text-xs text-purple-200/30 font-mono">ID: {org.Id}</p>
+                                    ) : (
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-4">
+                                                <div className="w-10 h-10 bg-purple-500/10 border border-purple-500/20 rounded-lg flex items-center justify-center">
+                                                    <Building2 className="w-5 h-5 text-purple-400" />
+                                                </div>
+                                                <div>
+                                                    <p className="text-sm font-semibold text-white">{org.Name}</p>
+                                                    <p className="text-xs text-purple-200/30 font-mono">ID: {org.Id}</p>
+                                                    {org.Metadata?.BasePrompt && (
+                                                        <p className="text-[10px] text-purple-400/60 mt-0.5 line-clamp-1 italic max-w-sm">
+                                                            Custom Prompt: {org.Metadata.BasePrompt}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="text-right mr-4">
+                                                    <span className="inline-block px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 text-[10px] font-bold uppercase tracking-wider">
+                                                        Active
+                                                    </span>
+                                                </div>
+                                                <button
+                                                    onClick={() => startEditing(org)}
+                                                    className="p-2 text-purple-200/20 hover:text-purple-400 hover:bg-purple-500/10 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                                                    title="Edit Organization"
+                                                >
+                                                    <Edit3 className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteOrg(org.Id, org.Name)}
+                                                    className="p-2 text-purple-200/20 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                                                    title="Delete Organization"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <div className="text-right mr-4">
-                                            <span className="inline-block px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 text-[10px] font-bold uppercase tracking-wider">
-                                                Active
-                                            </span>
-                                        </div>
-                                        <button
-                                            onClick={() => handleDeleteOrg(org.Id, org.Name)}
-                                            className="p-2 text-purple-200/20 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                                        >
-                                            <Trash2 className="w-4 h-4" />
-                                        </button>
-                                    </div>
+                                    )}
                                 </div>
                             ))
                         )}

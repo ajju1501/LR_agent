@@ -4,16 +4,18 @@ interface PromptContext {
   query: string;
   retrievedDocuments: DocumentChunk[];
   conversationHistory: Message[];
+  basePrompt?: string;
 }
 
 /**
  * Build a comprehensive RAG prompt with context, sources, and instructions for code examples
  */
 export function buildRAGPrompt(context: PromptContext): string {
-  const { query, retrievedDocuments, conversationHistory } = context;
+  const { query, retrievedDocuments, conversationHistory, basePrompt } = context;
 
-  const systemPrompt = `You are an expert LoginRadius documentation assistant. Your role is to provide **accurate, detailed, and actionable** answers based on the LoginRadius documentation provided below.
+  const defaultSystemPrompt = `You are an expert LoginRadius documentation assistant. Your role is to provide **accurate, detailed, and actionable** answers based on the LoginRadius documentation provided below.`;
 
+  const instructions = `
 ## Instructions:
 1. **Always base your answers on the provided documentation context.** If the context contains relevant information, use it thoroughly.
 2. **Include code examples** whenever the documentation provides them. Format code blocks with the appropriate language identifier (e.g., \`\`\`javascript, \`\`\`python, \`\`\`html, \`\`\`curl).
@@ -23,6 +25,8 @@ export function buildRAGPrompt(context: PromptContext): string {
 6. **If the answer is NOT in the provided context**, clearly state: "This information is not available in the current LoginRadius documentation. However, here's what I can suggest..." and provide general guidance.
 7. **Be thorough but concise** — don't omit important details, but avoid unnecessary filler.
 8. **For implementation questions**, provide step-by-step instructions with code snippets.`;
+
+  const finalSystemPrompt = `${basePrompt || defaultSystemPrompt}\n${instructions}`;
 
   // Build context section from retrieved documents
   let contextSection = '';
@@ -53,7 +57,7 @@ export function buildRAGPrompt(context: PromptContext): string {
   }
 
   // Build the complete prompt
-  const fullPrompt = `${systemPrompt}${contextSection}${historySection}
+  const fullPrompt = `${finalSystemPrompt}${contextSection}${historySection}
 
 ## ❓ User Question:
 ${query}

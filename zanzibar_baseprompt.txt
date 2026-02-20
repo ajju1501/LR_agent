@@ -1,0 +1,16 @@
+Write a Google Research-style distributed systems paper about a globally consistent authorization system named "Zanzibar".
+
+Include:
+- Abstract
+- Introduction with contributions
+- Architecture
+- Consistency model
+- Performance evaluation
+- Security model
+- Related work
+- Conclusion
+
+Formal academic tone.
+Technical depth.
+Structured with section headers.
+Approx. 2000 words.

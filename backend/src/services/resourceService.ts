@@ -1,5 +1,5 @@
 import axios from 'axios';
-const pdfParse = require('pdf-parse');
+import { PDFParse } from 'pdf-parse';
 import { documentService } from './documentService';
 import logger from '../utils/logger';
 import { Pool } from 'pg';
@@ -84,8 +84,10 @@ class ResourceService {
 
         try {
             // Extract text from PDF
-            const pdfData = await pdfParse(buffer);
-            const text = pdfData.text;
+            const parser = new PDFParse({ data: buffer });
+            const textData = await parser.getText();
+            const info = await parser.getInfo();
+            const text = textData.text;
 
             if (!text || text.trim().length < 10) {
                 throw new Error('PDF contains no extractable text');
@@ -93,7 +95,7 @@ class ResourceService {
 
             logger.info('PDF text extracted', {
                 filename,
-                pages: pdfData.numpages,
+                pages: info.total,
                 textLength: text.length,
             });
 
