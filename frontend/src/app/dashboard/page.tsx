@@ -1,18 +1,25 @@
 'use client'
 
 import { useAuth } from '@/context/AuthContext'
+import { useOrg } from '@/context/OrgContext'
 import RouteGuard from '@/components/RouteGuard'
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { apiClient } from '@/lib/api'
 import {
     BarChart3, MessageSquare, Users, Clock, TrendingUp,
-    Activity, Shield, LogOut, Zap, Bot, FileText, Eye
+    Activity, Shield, LogOut, Zap, Bot, FileText, Eye,
+    Building2, ChevronDown
 } from 'lucide-react'
 
 function DashboardPage() {
     const { user, logout } = useAuth()
+    const { currentOrg, switchOrg, organizations, currentOrgRole, availableOrgRoles, switchOrgRole, isTenantAdmin } = useOrg()
+    const router = useRouter()
     const [stats, setStats] = useState<any>(null)
     const [lastRefresh, setLastRefresh] = useState(new Date())
+
+    const displayOrgs = organizations.map(o => ({ OrgId: o.OrgId, OrgName: o.OrgName || o.OrgId }))
 
     useEffect(() => {
         loadStats()
@@ -49,6 +56,65 @@ function DashboardPage() {
                     </div>
 
                     <div className="flex items-center gap-4">
+                        {/* Org Switcher */}
+                        {displayOrgs.length > 0 && (
+                            <div className="relative">
+                                <select
+                                    value={currentOrg?.OrgId || ''}
+                                    onChange={(e) => {
+                                        const selectedOrgId = e.target.value
+                                        switchOrg(selectedOrgId)
+                                        // Navigate based on role in the selected org
+                                        if (!isTenantAdmin && selectedOrgId) {
+                                            const selectedOrgData = organizations.find(o => o.OrgId === selectedOrgId)
+                                            const role = selectedOrgData?.EffectiveRole
+                                            if (role === 'administrator') {
+                                                router.push('/admin')
+                                            } else if (role === 'user') {
+                                                router.push('/chat')
+                                            }
+                                            // 'observer' stays on /dashboard
+                                        }
+                                    }}
+                                    className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white appearance-none cursor-pointer focus:ring-1 focus:ring-emerald-500/50 outline-none pr-7"
+                                >
+                                    {displayOrgs.map(org => (
+                                        <option key={org.OrgId} value={org.OrgId} className="bg-slate-900">
+                                            {org.OrgName}
+                                        </option>
+                                    ))}
+                                </select>
+                                <Building2 className="absolute right-2 top-1.5 w-3.5 h-3.5 text-emerald-300/40 pointer-events-none" />
+                            </div>
+                        )}
+
+                        {/* Role Switcher */}
+                        {currentOrg && availableOrgRoles.length > 1 && !isTenantAdmin && (
+                            <div className="relative">
+                                <select
+                                    value={currentOrgRole || ''}
+                                    onChange={(e) => {
+                                        const role = e.target.value as any
+                                        switchOrgRole(role)
+                                        if (role === 'administrator') {
+                                            router.push('/admin')
+                                        } else if (role === 'user') {
+                                            router.push('/chat')
+                                        }
+                                        // 'observer' stays on /dashboard
+                                    }}
+                                    className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white appearance-none cursor-pointer focus:ring-1 focus:ring-emerald-500/50 outline-none pr-7"
+                                >
+                                    {availableOrgRoles.map(role => (
+                                        <option key={role} value={role} className="bg-slate-900">
+                                            {role.charAt(0).toUpperCase() + role.slice(1)}
+                                        </option>
+                                    ))}
+                                </select>
+                                <ChevronDown className="absolute right-2 top-1.5 w-3.5 h-3.5 text-emerald-300/40 pointer-events-none" />
+                            </div>
+                        )}
+
                         <div className="flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg">
                             <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
                             <span className="text-xs text-green-300 font-medium">Live</span>

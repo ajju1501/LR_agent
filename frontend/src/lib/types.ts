@@ -113,7 +113,17 @@ export interface Organization {
 export interface UserOrgContext {
   OrgId: string;
   OrgName?: string;
-  Roles?: string[];
+  Roles?: string[];          // Raw roles from LR (e.g., ['testlr1_administrator'])
+  EffectiveRole?: UserRole | null; // Parsed role: 'administrator' | 'user' | 'observer'
   [key: string]: any;
 }
 
+/** Response from GET /api/orgs/my-org-role/:orgId */
+export interface OrgRoleInfo {
+  orgId: string;
+  orgName?: string;
+  role: UserRole | null;
+  rawRoles: string[];
+  isMember: boolean;
+  isTenantAdmin: boolean;
+}

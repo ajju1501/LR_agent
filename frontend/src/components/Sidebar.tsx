@@ -4,16 +4,20 @@ import { useChat } from '@/context/ChatContext'
 import { useOrg } from '@/context/OrgContext'
 import { useAuth } from '@/context/AuthContext'
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Plus, Trash2, Menu, LogOut, Building2, ChevronDown } from 'lucide-react'
 
 export default function Sidebar() {
   const { user, logout } = useAuth()
   const { sessions, currentSessionId, createSession, deleteSession, loadHistory } = useChat()
-  const { organizations, allOrganizations, currentOrg, switchOrg, loadAllOrgs, loadMyOrgs } = useOrg()
+  const { organizations, allOrganizations, currentOrg, switchOrg, loadAllOrgs, loadMyOrgs, isTenantAdmin, currentOrgRole, availableOrgRoles, switchOrgRole } = useOrg()
+  const router = useRouter()
   const [open, setOpen] = useState(true)
   const [showOrgDropdown, setShowOrgDropdown] = useState(false)
 
-  const isAdmin = user?.roles.includes('administrator')
+  // Show admin link if user is tenant admin or org admin of any org
+  const isAdmin = isTenantAdmin
+  const showAdminLink = isTenantAdmin || currentOrgRole === 'administrator' || organizations.some(o => o.EffectiveRole === 'administrator')
 
   // Use allOrganizations for admins, otherwise just the memberships
   const displayOrgs = isAdmin ? allOrganizations.map(o => ({ OrgId: o.Id, OrgName: o.Name })) : organizations
@@ -24,7 +28,7 @@ export default function Sidebar() {
     } else {
       loadMyOrgs()
     }
-  }, [isAdmin, currentOrg?.OrgId, loadAllOrgs, loadMyOrgs])
+  }, [isAdmin, loadAllOrgs, loadMyOrgs])
 
   const handleNewChat = async () => {
     await createSession()
@@ -99,6 +103,16 @@ export default function Sidebar() {
                       onClick={() => {
                         switchOrg(org.OrgId)
                         setShowOrgDropdown(false)
+
+                        // Auto-navigate based on user's role in the selected org
+                        const fullOrg = organizations.find(o => o.OrgId === org.OrgId)
+                        const effectiveRole = fullOrg?.EffectiveRole
+                        if (isTenantAdmin || effectiveRole === 'administrator') {
+                          router.push('/admin')
+                        } else if (effectiveRole === 'observer') {
+                          router.push('/dashboard')
+                        }
+                        // 'user' role stays on /chat (current page)
                       }}
                       className={`w-full text-left px-3 py-2 text-xs transition-colors hover:bg-gray-700 ${currentOrg?.OrgId === org.OrgId ? 'text-blue-400 bg-gray-700/50' : 'text-gray-300'
                         }`}
@@ -106,18 +120,45 @@ export default function Sidebar() {
                       {org.OrgName}
                     </button>
                   ))}
-                  {isAdmin && (
+                  {showAdminLink && (
                     <div className="border-t border-gray-700 mt-1 p-2">
                       <button
                         onClick={() => window.location.href = '/admin'}
                         className="w-full text-[10px] text-blue-400 hover:underline text-left"
                       >
-                        Manage Organizations →
+                        {isTenantAdmin ? 'Tenant Admin Panel →' : 'Management Panel →'}
                       </button>
                     </div>
                   )}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Role Switcher — shows when org has multiple roles */}
+          {currentOrg && availableOrgRoles.length > 1 && (
+            <div className="mt-1">
+              <select
+                value={currentOrgRole || ''}
+                onChange={(e) => {
+                  const role = e.target.value as any
+                  switchOrgRole(role)
+                  // Navigate to the correct page for the selected role
+                  if (role === 'administrator') {
+                    router.push('/admin')
+                  } else if (role === 'observer') {
+                    router.push('/dashboard')
+                  }
+                  // 'user' stays on /chat (current page)
+                }}
+                className="w-full bg-gray-800/50 border border-gray-700 text-gray-200 px-3 py-1.5 rounded-lg text-[11px] appearance-none cursor-pointer focus:ring-1 focus:ring-blue-500/50 outline-none"
+              >
+                {availableOrgRoles.map(role => (
+                  <option key={role} value={role} className="bg-gray-800 capitalize">
+                    {role.charAt(0).toUpperCase() + role.slice(1)}
+                  </option>
+                ))}
+              </select>
             </div>
           )}
         </div>

@@ -1,6 +1,7 @@
 'use client'
 
 import { useAuth } from '@/context/AuthContext'
+import { useOrg } from '@/context/OrgContext'
 import { UserRole } from '@/lib/types'
 import { useRouter } from 'next/navigation'
 import { useEffect } from 'react'
@@ -12,7 +13,19 @@ interface RouteGuardProps {
 
 export default function RouteGuard({ children, allowedRoles }: RouteGuardProps) {
     const { user, isAuthenticated, isLoading } = useAuth()
+    const { currentOrgRole, isTenantAdmin } = useOrg()
     const router = useRouter()
+
+    // Check if the user has access based on global roles OR current org role
+    const hasAccess = (() => {
+        if (!user) return false
+        if (isTenantAdmin) return true // Tenant admin can access everything
+        // Check if current org role allows access
+        if (currentOrgRole && allowedRoles.includes(currentOrgRole)) return true
+        // Fallback: check global roles
+        if (user.roles.some((r) => allowedRoles.includes(r))) return true
+        return false
+    })()
 
     useEffect(() => {
         if (isLoading) return
@@ -22,17 +35,18 @@ export default function RouteGuard({ children, allowedRoles }: RouteGuardProps) 
             return
         }
 
-        if (user && !user.roles.some((r) => allowedRoles.includes(r))) {
-            // Redirect to the appropriate page for their role
-            if (user.roles.includes('administrator')) {
+        if (user && !hasAccess) {
+            // Redirect based on current org role first, then global roles
+            const activeRole = currentOrgRole || (user.roles[0] as UserRole)
+            if (activeRole === 'administrator' || isTenantAdmin) {
                 router.push('/admin')
-            } else if (user.roles.includes('observer')) {
+            } else if (activeRole === 'observer') {
                 router.push('/dashboard')
             } else {
                 router.push('/chat')
             }
         }
-    }, [isAuthenticated, isLoading, user, allowedRoles, router])
+    }, [isAuthenticated, isLoading, user, hasAccess, currentOrgRole, isTenantAdmin, router])
 
     if (isLoading) {
         return (
@@ -49,9 +63,7 @@ export default function RouteGuard({ children, allowedRoles }: RouteGuardProps) 
         return null // Will redirect via useEffect
     }
 
-    const hasRequiredRole = user?.roles.some((r) => allowedRoles.includes(r))
-
-    if (!hasRequiredRole) {
+    if (!hasAccess) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white p-6">
                 <div className="max-w-md w-full bg-slate-800 rounded-xl p-8 border border-slate-700 shadow-2xl text-center">
@@ -63,7 +75,7 @@ export default function RouteGuard({ children, allowedRoles }: RouteGuardProps) 
                     <h2 className="text-2xl font-bold mb-2">Access Denied</h2>
                     <p className="text-slate-400 mb-8">
                         You do not have the required permissions to view this page.
-                        Your current roles: <span className="text-purple-400 font-mono">[{user?.roles.join(', ') || 'none'}]</span>
+                        Your current role: <span className="text-purple-400 font-mono">{currentOrgRole || 'none'}</span>
                     </p>
                     <div className="space-y-3">
                         <button

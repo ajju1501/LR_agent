@@ -7,7 +7,7 @@ import authRoutes from './routes/authRoutes';
 import chatRoutes from './routes/chatRoutes';
 import documentRoutes from './routes/documentRoutes';
 import orgRoutes from './routes/orgRoutes';
-import { requireAuth, requireRole } from './middleware/auth';
+import { requireAuth, requireRole, requireOrgRole } from './middleware/auth';
 
 export function createApp(): Express {
   const app = express();
@@ -54,17 +54,17 @@ export function createApp(): Express {
   // Auth routes (public: login/register, protected: profile/assign-role)
   app.use('/api/auth', authRoutes);
 
-  // Chat routes — requires auth, roles: administrator or user
-  app.use('/api/chat', requireAuth, requireRole('administrator', 'user'), chatRoutes);
+  // Chat routes — requires auth, roles: administrator or user (global or org-level)
+  app.use('/api/chat', requireAuth, requireOrgRole('administrator', 'user'), chatRoutes);
 
-  // Document routes — requires auth, role: administrator only
-  app.use('/api/documents', requireAuth, requireRole('administrator'), documentRoutes);
+  // Document routes — requires auth, role: administrator (global or org-level)
+  app.use('/api/documents', requireAuth, requireOrgRole('administrator'), documentRoutes);
 
   // Organization routes — auth + role checks handled per-route in orgRoutes.ts
   app.use('/api/orgs', orgRoutes);
 
-  // Dashboard stats (observer + administrator)
-  app.get('/api/dashboard/stats', requireAuth, requireRole('administrator', 'observer'), async (req: Request, res: Response) => {
+  // Dashboard stats (observer + administrator, global or org-level)
+  app.get('/api/dashboard/stats', requireAuth, requireOrgRole('administrator', 'observer'), async (req: Request, res: Response) => {
     // Placeholder — will be expanded with real metrics
     res.json({
       status: 'success',

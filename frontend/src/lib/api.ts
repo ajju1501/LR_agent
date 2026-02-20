@@ -10,6 +10,7 @@ import {
   AuthUser,
   Organization,
   UserOrgContext,
+  OrgRoleInfo,
 } from './types';
 
 class APIClient {
@@ -362,6 +363,11 @@ class APIClient {
 
   async getOrgRoles(orgId: string): Promise<any[]> {
     const response = await this.client.get<{ status: string; data: any[] }>(`/api/orgs/${orgId}/roles`);
+    return response.data.data;
+  }
+
+  async getMyOrgRole(orgId: string): Promise<OrgRoleInfo> {
+    const response = await this.client.get<{ status: string; data: OrgRoleInfo }>(`/api/orgs/my-org-role/${orgId}`);
     return response.data.data;
   }
 

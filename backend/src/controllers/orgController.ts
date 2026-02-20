@@ -184,3 +184,69 @@ export async function getMyOrganizations(req: AuthenticatedRequest, res: Respons
     }
 }
 
+/**
+ * GET /api/orgs/my-org-role/:orgId
+ * Get the current authenticated user's effective role in a specific organization
+ */
+export async function getMyOrgRole(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ status: 'error', message: 'Not authenticated' });
+        }
+
+        const { orgId } = req.params;
+
+        // If user is a global admin, they always have 'administrator' role in any org
+        if (req.user.roles.includes('administrator')) {
+            let orgName = orgId;
+            try {
+                const org = await loginRadiusService.getOrganization(orgId);
+                orgName = org.Name;
+            } catch (_) { /* ignore */ }
+
+            return res.json({
+                status: 'success',
+                data: {
+                    orgId,
+                    orgName,
+                    role: 'administrator',
+                    rawRoles: ['administrator'],
+                    isMember: true,
+                    isTenantAdmin: true,
+                },
+            });
+        }
+
+        // For non-admin users, fetch their org context
+        const contexts = await loginRadiusService.getUserOrgContext(req.user.uid);
+        const orgCtx = contexts.find(c => c.OrgId === orgId);
+
+        if (!orgCtx) {
+            return res.json({
+                status: 'success',
+                data: {
+                    orgId,
+                    role: null,
+                    rawRoles: [],
+                    isMember: false,
+                    isTenantAdmin: false,
+                },
+            });
+        }
+
+        res.json({
+            status: 'success',
+            data: {
+                orgId,
+                orgName: orgCtx.OrgName,
+                role: orgCtx.EffectiveRole || null,
+                rawRoles: orgCtx.Roles || [],
+                isMember: true,
+                isTenantAdmin: false,
+            },
+        });
+    } catch (error: any) {
+        logger.error('Failed to get user org role', { uid: req.user?.uid, orgId: req.params.orgId, error: error.message });
+        res.status(500).json({ status: 'error', message: error.message });
+    }
+}

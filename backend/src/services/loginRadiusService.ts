@@ -52,6 +52,7 @@ export interface LRUserOrgContext {
     OrgId: string;
     OrgName?: string;
     Roles?: string[];
+    EffectiveRole?: UserRole | null; // Parsed role: 'administrator' | 'user' | 'observer'
     [key: string]: any;
 }
 
@@ -426,6 +427,24 @@ class LoginRadiusService {
     }
 
     /**
+     * Get ALL raw role name strings for a user (unfiltered).
+     * Returns names like ['administrator', 'testlr1_administrator', 'testlr2_user']
+     */
+    async getRawRolesByUid(uid: string): Promise<string[]> {
+        try {
+            const response = await this.client.get(`/identity/v2/manage/account/${uid}/role`, {
+                params: { apikey: this.apiKey, apisecret: this.apiSecret },
+            });
+
+            const rawRoles = response.data?.Roles || [];
+            return rawRoles.map((r: any) => (typeof r === 'string' ? r : r.Name)).filter(Boolean);
+        } catch (error: any) {
+            logger.warn('Failed to get raw roles for user', { uid, error: error.message });
+            return [];
+        }
+    }
+
+    /**
      * Assign roles to a user by UID (Management API)
      * PUT /identity/v2/manage/account/:uid/role
      */
@@ -699,40 +718,210 @@ class LoginRadiusService {
         }
     }
 
+    /**
+     * Resolve the user's effective role for a specific organization.
+     * Convention: roles are named {orgName}_{roleSuffix}
+     * e.g., "testlr1_administrator", "testlr1_user", "testlr1_observer"
+     *
+     * Returns: 'administrator' | 'user' | 'observer' | null
+     */
+    getEffectiveOrgRole(orgRoles: string[], orgName: string): UserRole | null {
+        if (!orgRoles || orgRoles.length === 0 || !orgName) return null;
+
+        const normalizedOrgName = orgName.toLowerCase().replace(/\s+/g, '');
+        const roleSuffixes: UserRole[] = ['administrator', 'user', 'observer'];
+
+        // Priority match: look for exact {orgName}_{suffix} pattern
+        for (const suffix of roleSuffixes) {
+            const expectedRole = `${normalizedOrgName}_${suffix}`;
+            if (orgRoles.some(r => r.toLowerCase() === expectedRole)) {
+                logger.debug(`Matched org role: ${expectedRole} -> ${suffix}`);
+                return suffix;
+            }
+        }
+
+        // Fallback: check if any role ends with a known suffix
+        for (const suffix of roleSuffixes) {
+            if (orgRoles.some(r => r.toLowerCase().endsWith(`_${suffix}`))) {
+                return suffix;
+            }
+        }
+
+        // Last fallback: check if any role contains the suffix directly
+        for (const suffix of roleSuffixes) {
+            if (orgRoles.some(r => r.toLowerCase().includes(suffix))) {
+                return suffix;
+            }
+        }
+
+        return null;
+    }
+
 
     /**
-     * Get user's organization context (all orgs + roles for a user)
-     * GET /v2/manage/account/:uid/orgcontext
+     * Cache for role ID → role name lookups (avoids redundant API calls)
      */
-    async getUserOrgContext(uid: string): Promise<LRUserOrgContext[]> {
+    private roleCache = new Map<string, string>();
+
+    /**
+     * Get a role's details by its ID.
+     * GET /v2/manage/roles/:id
+     */
+    async getRoleById(roleId: string): Promise<string | null> {
+        // Check cache first
+        if (this.roleCache.has(roleId)) {
+            return this.roleCache.get(roleId)!;
+        }
+
         try {
-            const response = await this.client.get(`/v2/manage/account/${uid}/orgcontext`, {
+            const response = await this.client.get(`/v2/manage/roles/${roleId}`, {
                 params: { apikey: this.apiKey, apisecret: this.apiSecret },
             });
 
-            let contexts: any[] = response.data?.Data || response.data || [];
+            const data = response.data?.Data || response.data;
+            const roleName = data?.Name || data?.name || null;
+
+            if (roleName) {
+                this.roleCache.set(roleId, roleName);
+            }
+
+            logger.debug(`getRoleById: ${roleId} → ${roleName}`, { rawData: data });
+            return roleName;
+        } catch (error: any) {
+            logger.warn(`Failed to get role by ID ${roleId}`, {
+                error: error.response?.data?.Description || error.message,
+                status: error.response?.status,
+            });
+            return null;
+        }
+    }
+
+    /**
+     * Get a user's roles within a SPECIFIC organization.
+     *
+     * Step 1: GET /v2/manage/account/:uid/orgcontext/:orgId
+     *   → returns array of { RoleId, OrgId, Uid, ... }
+     *
+     * Step 2: GET /v2/manage/roles/:roleId (for each RoleId)
+     *   → returns the role name (e.g. "testlr1_administrator")
+     *
+     * @see https://www.loginradius.com/docs/api/openapi/get-org-context-by-uid-and-org-id/
+     */
+    async getUserOrgRoles(uid: string, orgId: string): Promise<string[]> {
+        try {
+            const response = await this.client.get(
+                `/v2/manage/account/${uid}/orgcontext/${orgId}`,
+                { params: { apikey: this.apiKey, apisecret: this.apiSecret } }
+            );
+
+            const data = response.data?.Data || response.data;
+            logger.debug(`getUserOrgRoles raw response: uid=${uid}, orgId=${orgId}`, { data });
+
+            if (!Array.isArray(data) || data.length === 0) {
+                return [];
+            }
+
+            // Extract unique RoleIds from the response
+            const roleIds = [...new Set(
+                data.map((entry: any) => entry.RoleId).filter(Boolean)
+            )] as string[];
+
+            if (roleIds.length === 0) {
+                return [];
+            }
+
+            // Resolve each RoleId to a role name
+            const roleNames = await Promise.all(
+                roleIds.map(id => this.getRoleById(id))
+            );
+
+            const resolvedRoles = roleNames.filter(Boolean) as string[];
+            logger.debug(`getUserOrgRoles resolved: uid=${uid}, orgId=${orgId}`, {
+                roleIds,
+                resolvedRoles,
+            });
+
+            return resolvedRoles;
+        } catch (error: any) {
+            logger.warn(`Failed to get user roles for org ${orgId}`, {
+                uid,
+                error: error.response?.data?.Description || error.message,
+                status: error.response?.status,
+            });
+            return [];
+        }
+    }
+
+    /**
+     * Get user's organization context (all orgs + roles for a user)
+     *
+     * Step 1: GET /v2/manage/account/:uid/orgcontext → list of org memberships
+     *         (may contain duplicates — one entry per role assignment)
+     * Step 2: Deduplicate by OrgId
+     * Step 3: GET /v2/manage/account/:uid/orgcontext/:orgId → roles per unique org
+     */
+    async getUserOrgContext(uid: string): Promise<LRUserOrgContext[]> {
+        try {
+            // Step 1: Fetch org memberships
+            const orgResponse = await this.client.get(`/v2/manage/account/${uid}/orgcontext`, {
+                params: { apikey: this.apiKey, apisecret: this.apiSecret },
+            });
+
+            let contexts: any[] = orgResponse.data?.Data || orgResponse.data || [];
             if (!Array.isArray(contexts)) contexts = [];
 
-            // Normalize fields and ensure OrgName is present
-            const normalizedContexts = await Promise.all(contexts.map(async (ctx: any) => {
-                const normalized = {
-                    OrgId: ctx.OrgId,
-                    OrgName: ctx.OrgName || ctx.Name || null,
-                    Roles: ctx.Roles || [],
-                };
+            logger.debug('User org context raw', { uid, orgCount: contexts.length });
 
-                // If name is still missing, try to fetch it from org details
-                if (!normalized.OrgName && normalized.OrgId) {
-                    try {
-                        const org = await this.getOrganization(normalized.OrgId);
-                        normalized.OrgName = org.Name;
-                    } catch (e) {
-                        logger.warn(`Could not fetch name for org ${normalized.OrgId}`);
-                        normalized.OrgName = `Org ${normalized.OrgId.substring(0, 8)}`;
-                    }
+            // Step 2: Deduplicate by OrgId (API returns one entry per role assignment)
+            const uniqueOrgs = new Map<string, { OrgId: string; OrgName: string | null }>();
+            for (const ctx of contexts) {
+                if (ctx.OrgId && !uniqueOrgs.has(ctx.OrgId)) {
+                    uniqueOrgs.set(ctx.OrgId, {
+                        OrgId: ctx.OrgId,
+                        OrgName: ctx.OrgName || ctx.Name || null,
+                    });
                 }
-                return normalized;
-            }));
+            }
+
+            logger.debug(`Deduplicated orgs: ${contexts.length} entries → ${uniqueOrgs.size} unique orgs`);
+
+            // Step 3: For each unique org, fetch the user's roles
+            const normalizedContexts = await Promise.all(
+                Array.from(uniqueOrgs.values()).map(async (org) => {
+                    const normalized: LRUserOrgContext = {
+                        OrgId: org.OrgId,
+                        OrgName: org.OrgName || undefined,
+                        Roles: [],
+                        EffectiveRole: null,
+                    };
+
+                    // Get org name if missing
+                    if (!normalized.OrgName && normalized.OrgId) {
+                        try {
+                            const orgDetail = await this.getOrganization(normalized.OrgId);
+                            normalized.OrgName = orgDetail.Name;
+                        } catch (e) {
+                            logger.warn(`Could not fetch name for org ${normalized.OrgId}`);
+                            normalized.OrgName = `Org ${normalized.OrgId.substring(0, 8)}`;
+                        }
+                    }
+
+                    // Fetch org-specific roles using the dedicated endpoint
+                    const orgRoles = await this.getUserOrgRoles(uid, normalized.OrgId);
+                    normalized.Roles = orgRoles;
+
+                    // Resolve effective role (picks the highest-privilege role)
+                    if (orgRoles.length > 0) {
+                        normalized.EffectiveRole = this.getEffectiveOrgRole(
+                            orgRoles,
+                            normalized.OrgName || ''
+                        );
+                    }
+
+                    logger.debug(`Org "${normalized.OrgName}" (${normalized.OrgId}): roles=${JSON.stringify(orgRoles)}, effective=${normalized.EffectiveRole}`);
+                    return normalized;
+                })
+            );
 
             return normalizedContexts;
         } catch (error: any) {

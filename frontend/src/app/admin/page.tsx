@@ -4,24 +4,80 @@ import { useAuth } from '@/context/AuthContext'
 import { ChatProvider } from '@/context/ChatContext'
 import RouteGuard from '@/components/RouteGuard'
 import ChatInterface from '@/components/ChatInterface'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { apiClient } from '@/lib/api'
+import { usePagePermissions } from '@/hooks/usePagePermissions'
 import {
     Shield, MessageSquare, FolderOpen, Users, Settings,
     LogOut, Globe, Loader2, CheckCircle, AlertCircle,
     Database, FileText, UserPlus, Upload, Github, Trash2,
-    Building2, Plus, ChevronDown
+    Building2, Plus, ChevronDown, Eye, Lock, Crown
 } from 'lucide-react'
 import { useOrg } from '@/context/OrgContext'
 
+type TabId = 'organizations' | 'chat' | 'documents' | 'users'
+
 function AdminPage() {
     const { user, logout } = useAuth()
-    const { currentOrg, switchOrg, allOrganizations, loadAllOrgs } = useOrg()
-    const [activeTab, setActiveTab] = useState<'chat' | 'documents' | 'users' | 'organizations'>('organizations')
+    const { currentOrg, switchOrg, allOrganizations, organizations, loadAllOrgs, loadMyOrgs, currentOrgRole, isTenantAdmin, availableOrgRoles, switchOrgRole } = useOrg()
+    const perms = usePagePermissions()
+    const router = useRouter()
+
+    // Determine available tabs based on permissions
+    const availableTabs = useMemo(() => {
+        const tabs: { id: TabId; label: string; icon: any }[] = []
+
+        if (perms.canManageOrgs) {
+            tabs.push({ id: 'organizations', label: 'Organizations', icon: Building2 })
+        }
+        if (perms.canChat) {
+            tabs.push({ id: 'chat', label: 'Chatbot', icon: MessageSquare })
+        }
+        if (perms.canManageDocuments || perms.canViewDocuments) {
+            tabs.push({ id: 'documents', label: 'Documents', icon: FolderOpen })
+        }
+        if (perms.canManageUsers) {
+            tabs.push({ id: 'users', label: 'User Management', icon: Users })
+        }
+
+        return tabs
+    }, [perms])
+
+    const [activeTab, setActiveTab] = useState<TabId>('organizations')
+
+    // Set default tab based on permissions
+    useEffect(() => {
+        if (availableTabs.length > 0 && !availableTabs.some(t => t.id === activeTab)) {
+            setActiveTab(availableTabs[0].id)
+        }
+    }, [availableTabs, activeTab])
 
     useEffect(() => {
-        loadAllOrgs()
-    }, [loadAllOrgs])
+        if (isTenantAdmin) {
+            loadAllOrgs()
+        } else {
+            loadMyOrgs()
+        }
+    }, [isTenantAdmin, loadAllOrgs, loadMyOrgs])
+
+    // Determine which orgs to show in dropdown
+    const displayOrgs = isTenantAdmin
+        ? allOrganizations.map(o => ({ OrgId: o.Id, OrgName: o.Name }))
+        : organizations.map(o => ({ OrgId: o.OrgId, OrgName: o.OrgName || o.OrgId }))
+
+    // Role badge color
+    const getRoleBadge = () => {
+        if (isTenantAdmin) return { text: 'Tenant Admin', color: 'bg-amber-500/20 text-amber-300 border-amber-500/30' }
+        switch (currentOrgRole) {
+            case 'administrator': return { text: 'Org Admin', color: 'bg-purple-500/20 text-purple-300 border-purple-500/30' }
+            case 'user': return { text: 'User', color: 'bg-blue-500/20 text-blue-300 border-blue-500/30' }
+            case 'observer': return { text: 'Observer', color: 'bg-gray-500/20 text-gray-300 border-gray-500/30' }
+            default: return { text: 'No Access', color: 'bg-red-500/20 text-red-300 border-red-500/30' }
+        }
+    }
+
+    const roleBadge = getRoleBadge()
 
     return (
         <div className="h-screen flex bg-slate-950">
@@ -30,12 +86,19 @@ function AdminPage() {
                 {/* Logo */}
                 <div className="p-5 border-b border-white/5">
                     <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 bg-gradient-to-br from-purple-400 to-blue-500 rounded-lg flex items-center justify-center">
-                            <Shield className="w-5 h-5 text-white" />
+                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${isTenantAdmin
+                            ? 'bg-gradient-to-br from-amber-400 to-orange-500'
+                            : 'bg-gradient-to-br from-purple-400 to-blue-500'
+                            }`}>
+                            {isTenantAdmin ? <Crown className="w-5 h-5 text-white" /> : <Shield className="w-5 h-5 text-white" />}
                         </div>
                         <div>
-                            <h1 className="text-sm font-bold text-white">Admin Panel</h1>
-                            <p className="text-xs text-purple-300/60">Administrator</p>
+                            <h1 className="text-sm font-bold text-white">
+                                {isTenantAdmin ? 'Tenant Panel' : 'Management'}
+                            </h1>
+                            <p className="text-xs text-purple-300/60">
+                                {isTenantAdmin ? 'Super Administrator' : currentOrg?.OrgName || 'Select Org'}
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -46,31 +109,92 @@ function AdminPage() {
                     <div className="relative">
                         <select
                             value={currentOrg?.OrgId || ''}
-                            onChange={(e) => switchOrg(e.target.value)}
+                            onChange={(e) => {
+                                const selectedOrgId = e.target.value
+                                switchOrg(selectedOrgId)
+
+                                // Navigate based on user's role in the selected org
+                                if (!isTenantAdmin && selectedOrgId) {
+                                    const selectedOrgData = organizations.find(o => o.OrgId === selectedOrgId)
+                                    const role = selectedOrgData?.EffectiveRole
+                                    if (role === 'observer') {
+                                        router.push('/dashboard')
+                                    } else if (role === 'user') {
+                                        router.push('/chat')
+                                    }
+                                    // 'administrator' stays on /admin
+                                }
+                            }}
                             className="w-full bg-slate-900/50 border border-white/10 rounded-lg px-3 py-2 text-xs text-white appearance-none cursor-pointer focus:ring-1 focus:ring-purple-500/50 outline-none"
                         >
-                            <option value="" className="bg-slate-900">Global (No Org)</option>
-                            {allOrganizations.map(org => (
-                                <option key={org.Id} value={org.Id} className="bg-slate-900">
-                                    {org.Name}
+                            {isTenantAdmin && (
+                                <option value="" className="bg-slate-900">Global (No Org)</option>
+                            )}
+                            {displayOrgs.map(org => (
+                                <option key={org.OrgId} value={org.OrgId} className="bg-slate-900">
+                                    {org.OrgName}
                                 </option>
                             ))}
                         </select>
                         <ChevronDown className="absolute right-2 top-2.5 w-3.5 h-3.5 text-purple-300/40 pointer-events-none" />
                     </div>
+
+                    {/* Role Switcher — shows when org has multiple roles */}
+                    {currentOrg && availableOrgRoles.length > 1 && !isTenantAdmin && (
+                        <div className="mt-2">
+                            <label className="block text-[10px] text-purple-300/40 uppercase tracking-widest font-bold mb-1">Active Role</label>
+                            <div className="relative">
+                                <select
+                                    value={currentOrgRole || ''}
+                                    onChange={(e) => {
+                                        const role = e.target.value as any
+                                        switchOrgRole(role)
+                                        // Navigate to the correct page for the selected role
+                                        if (role === 'observer') {
+                                            router.push('/dashboard')
+                                        } else if (role === 'user') {
+                                            router.push('/chat')
+                                        }
+                                        // 'administrator' stays on /admin
+                                    }}
+                                    className="w-full bg-slate-900/50 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white appearance-none cursor-pointer focus:ring-1 focus:ring-purple-500/50 outline-none"
+                                >
+                                    {availableOrgRoles.map(role => (
+                                        <option key={role} value={role} className="bg-slate-900">
+                                            {role.charAt(0).toUpperCase() + role.slice(1)}
+                                        </option>
+                                    ))}
+                                </select>
+                                <ChevronDown className="absolute right-2 top-1.5 w-3.5 h-3.5 text-purple-300/40 pointer-events-none" />
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Role Badge */}
+                    {currentOrg && (
+                        <div className="mt-2 flex items-center gap-2">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${roleBadge.color}`}>
+                                {currentOrgRole === 'administrator' || isTenantAdmin ? (
+                                    <Shield className="w-2.5 h-2.5" />
+                                ) : currentOrgRole === 'observer' ? (
+                                    <Eye className="w-2.5 h-2.5" />
+                                ) : currentOrgRole === 'user' ? (
+                                    <Users className="w-2.5 h-2.5" />
+                                ) : (
+                                    <Lock className="w-2.5 h-2.5" />
+                                )}
+                                {roleBadge.text}
+                            </span>
+                        </div>
+                    )}
                 </div>
 
                 {/* Nav */}
                 <nav className="flex-1 p-3 space-y-1">
-                    {[
-                        { id: 'organizations', label: 'Organizations', icon: Building2 },
-                        { id: 'chat', label: 'Chatbot', icon: MessageSquare },
-                        { id: 'documents', label: 'Documents', icon: FolderOpen },
-                        { id: 'users', label: 'User Management', icon: Users },
-                    ].map(({ id, label, icon: Icon }) => (
+                    {availableTabs.map(({ id, label, icon: Icon }) => (
                         <button
                             key={id}
-                            onClick={() => setActiveTab(id as any)}
+                            onClick={() => setActiveTab(id)}
                             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === id
                                 ? 'bg-purple-500/20 text-purple-200 border border-purple-500/30'
                                 : 'text-purple-200/50 hover:text-purple-200 hover:bg-white/5'
@@ -80,17 +204,35 @@ function AdminPage() {
                             {label}
                         </button>
                     ))}
+
+                    {/* Show message if no tabs available */}
+                    {availableTabs.length === 0 && (
+                        <div className="p-4 text-center">
+                            <Lock className="w-8 h-8 text-purple-300/20 mx-auto mb-2" />
+                            <p className="text-purple-200/40 text-xs">No permissions for this org</p>
+                            <p className="text-purple-200/20 text-[10px] mt-1">Select a different organization</p>
+                        </div>
+                    )}
                 </nav>
 
                 {/* User info + logout */}
                 <div className="p-4 border-t border-white/5">
                     <div className="flex items-center gap-3 mb-3">
-                        <div className="w-8 h-8 bg-gradient-to-br from-green-400 to-emerald-500 rounded-full flex items-center justify-center text-white text-xs font-bold">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold ${isTenantAdmin
+                            ? 'bg-gradient-to-br from-amber-400 to-orange-500'
+                            : 'bg-gradient-to-br from-green-400 to-emerald-500'
+                            }`}>
                             {user?.firstName?.[0] || user?.email?.[0]?.toUpperCase() || 'A'}
                         </div>
                         <div className="flex-1 min-w-0">
                             <p className="text-sm text-white font-medium truncate">{user?.fullName || user?.email}</p>
-                            <p className="text-xs text-purple-300/50">{user?.roles?.[0]}</p>
+                            <div className="flex flex-wrap gap-1 mt-0.5">
+                                {user?.roles?.map(role => (
+                                    <span key={role} className="text-[9px] text-purple-300/50 bg-purple-500/10 px-1.5 py-0.5 rounded capitalize">
+                                        {role}
+                                    </span>
+                                ))}
+                            </div>
                         </div>
                     </div>
                     <button
@@ -105,22 +247,40 @@ function AdminPage() {
 
             {/* Main Content */}
             <main className="flex-1 flex flex-col overflow-hidden">
-                {activeTab === 'chat' && (
+                {activeTab === 'chat' && perms.canChat && (
                     <ChatProvider>
                         <ChatInterface />
                     </ChatProvider>
                 )}
 
-                {activeTab === 'documents' && <DocumentsPanel />}
-                {activeTab === 'users' && <UsersPanel />}
-                {activeTab === 'organizations' && <OrganizationsPanel />}
+                {activeTab === 'documents' && <DocumentsPanel readOnly={!perms.canManageDocuments} />}
+                {activeTab === 'users' && perms.canManageUsers && <UsersPanel />}
+                {activeTab === 'organizations' && perms.canManageOrgs && <OrganizationsPanel />}
+
+                {/* No permissions fallback */}
+                {availableTabs.length === 0 && (
+                    <div className="flex-1 flex items-center justify-center bg-gradient-to-b from-slate-950 to-slate-900">
+                        <div className="text-center max-w-md">
+                            <div className="w-16 h-16 bg-purple-500/10 border border-purple-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                                <Lock className="w-8 h-8 text-purple-400/50" />
+                            </div>
+                            <h2 className="text-xl font-bold text-white mb-2">No Access</h2>
+                            <p className="text-purple-200/50 text-sm">
+                                {currentOrg
+                                    ? `You don't have any roles in "${currentOrg.OrgName}". Please select a different organization.`
+                                    : 'Please select an organization to continue.'
+                                }
+                            </p>
+                        </div>
+                    </div>
+                )}
             </main>
         </div>
     )
 }
 
 /* ─────────── Documents Panel ─────────── */
-function DocumentsPanel() {
+function DocumentsPanel({ readOnly = false }: { readOnly?: boolean }) {
     const { currentOrg } = useOrg()
     const [stats, setStats] = useState<any>(null)
     const [resources, setResources] = useState<any[]>([])
@@ -249,10 +409,20 @@ function DocumentsPanel() {
         <div className="flex-1 p-8 overflow-y-auto bg-gradient-to-b from-slate-950 to-slate-900">
             <div className="max-w-4xl mx-auto">
                 <div className="mb-8 border-b border-white/5 pb-6">
-                    <h2 className="text-2xl font-bold text-white mb-2">Knowledge Base</h2>
-                    <p className="text-purple-200/50 text-sm">
-                        Manage documents for <span className="text-purple-300 font-bold">{currentOrg?.OrgName || 'Global Context'}</span>
-                    </p>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h2 className="text-2xl font-bold text-white mb-2">Knowledge Base</h2>
+                            <p className="text-purple-200/50 text-sm">
+                                {readOnly ? 'Viewing' : 'Manage'} documents for <span className="text-purple-300 font-bold">{currentOrg?.OrgName || 'Global Context'}</span>
+                            </p>
+                        </div>
+                        {readOnly && (
+                            <span className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-300 text-xs font-medium">
+                                <Eye className="w-3.5 h-3.5" />
+                                Read Only
+                            </span>
+                        )}
+                    </div>
                 </div>
 
                 {/* Global status messages */}
@@ -288,134 +458,140 @@ function DocumentsPanel() {
                     ))}
                 </div>
 
-                {/* ──── PDF Upload ──── */}
-                <div className="bg-white/5 border border-white/10 rounded-xl p-6 mb-6">
-                    <h3 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
-                        <Upload className="w-5 h-5 text-purple-400" />
-                        Upload PDF
-                    </h3>
-                    <p className="text-purple-200/50 text-sm mb-4">
-                        Upload PDF documents to add to the chatbot&apos;s knowledge base. Max 20MB per file.
-                    </p>
+                {/* ──── PDF Upload (admin only) ──── */}
+                {!readOnly && (
+                    <div className="bg-white/5 border border-white/10 rounded-xl p-6 mb-6">
+                        <h3 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
+                            <Upload className="w-5 h-5 text-purple-400" />
+                            Upload PDF
+                        </h3>
+                        <p className="text-purple-200/50 text-sm mb-4">
+                            Upload PDF documents to add to the chatbot&apos;s knowledge base. Max 20MB per file.
+                        </p>
 
-                    <div
-                        onDragEnter={handleDrag}
-                        onDragLeave={handleDrag}
-                        onDragOver={handleDrag}
-                        onDrop={handleDrop}
-                        className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer
-                            ${dragActive
-                                ? 'border-purple-400 bg-purple-500/10'
-                                : 'border-white/10 hover:border-purple-400/40 hover:bg-white/[0.02]'
-                            }
-                            ${uploading ? 'opacity-50 pointer-events-none' : ''}
-                        `}
-                    >
-                        <input
-                            type="file"
-                            accept=".pdf"
-                            onChange={(e) => {
-                                const file = e.target.files?.[0]
-                                if (file) handleFileSelect(file)
-                                e.target.value = ''
-                            }}
-                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                            id="pdf-upload-input"
-                        />
-
-                        {uploading ? (
-                            <div className="flex flex-col items-center gap-3">
-                                <Loader2 className="w-8 h-8 text-purple-400 animate-spin" />
-                                <p className="text-purple-200 text-sm font-medium">Processing PDF...</p>
-                                <p className="text-purple-200/40 text-xs">Extracting text, chunking & indexing</p>
-                            </div>
-                        ) : (
-                            <div className="flex flex-col items-center gap-3">
-                                <div className="w-12 h-12 bg-purple-500/10 border border-purple-500/20 rounded-xl flex items-center justify-center">
-                                    <Upload className="w-6 h-6 text-purple-400" />
-                                </div>
-                                <div>
-                                    <p className="text-purple-200 text-sm font-medium">
-                                        Drop a PDF here or <span className="text-purple-400 underline">browse</span>
-                                    </p>
-                                    <p className="text-purple-200/40 text-xs mt-1">PDF files up to 20MB</p>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* ──── GitHub Repo ──── */}
-                <div className="bg-white/5 border border-white/10 rounded-xl p-6 mb-6">
-                    <h3 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
-                        <Github className="w-5 h-5 text-purple-400" />
-                        Add GitHub Repository
-                    </h3>
-                    <p className="text-purple-200/50 text-sm mb-4">
-                        Index a public GitHub repository&apos;s code and documentation into the knowledge base.
-                    </p>
-
-                    <div className="flex gap-3">
-                        <input
-                            type="text"
-                            value={repoUrl}
-                            onChange={(e) => setRepoUrl(e.target.value)}
-                            placeholder="https://github.com/owner/repo"
-                            disabled={ingesting}
-                            className="flex-1 px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-purple-300/30 focus:outline-none focus:ring-2 focus:ring-purple-400/50 transition-all disabled:opacity-50"
-                            id="github-repo-input"
-                            onKeyDown={(e) => { if (e.key === 'Enter') handleIngestGitHub() }}
-                        />
-                        <button
-                            onClick={handleIngestGitHub}
-                            disabled={ingesting || !repoUrl.trim()}
-                            className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 disabled:from-gray-600 disabled:to-gray-600 text-white font-medium rounded-lg transition-all text-sm shadow-lg shadow-purple-500/20 whitespace-nowrap"
-                            id="ingest-github-btn"
+                        <div
+                            onDragEnter={handleDrag}
+                            onDragLeave={handleDrag}
+                            onDragOver={handleDrag}
+                            onDrop={handleDrop}
+                            className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer
+                                ${dragActive
+                                    ? 'border-purple-400 bg-purple-500/10'
+                                    : 'border-white/10 hover:border-purple-400/40 hover:bg-white/[0.02]'
+                                }
+                                ${uploading ? 'opacity-50 pointer-events-none' : ''}
+                            `}
                         >
-                            {ingesting ? (
+                            <input
+                                type="file"
+                                accept=".pdf"
+                                onChange={(e) => {
+                                    const file = e.target.files?.[0]
+                                    if (file) handleFileSelect(file)
+                                    e.target.value = ''
+                                }}
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                id="pdf-upload-input"
+                            />
+
+                            {uploading ? (
+                                <div className="flex flex-col items-center gap-3">
+                                    <Loader2 className="w-8 h-8 text-purple-400 animate-spin" />
+                                    <p className="text-purple-200 text-sm font-medium">Processing PDF...</p>
+                                    <p className="text-purple-200/40 text-xs">Extracting text, chunking & indexing</p>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col items-center gap-3">
+                                    <div className="w-12 h-12 bg-purple-500/10 border border-purple-500/20 rounded-xl flex items-center justify-center">
+                                        <Upload className="w-6 h-6 text-purple-400" />
+                                    </div>
+                                    <div>
+                                        <p className="text-purple-200 text-sm font-medium">
+                                            Drop a PDF here or <span className="text-purple-400 underline">browse</span>
+                                        </p>
+                                        <p className="text-purple-200/40 text-xs mt-1">PDF files up to 20MB</p>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* ──── GitHub Repo (admin only) ──── */}
+                {!readOnly && (
+                    <div className="bg-white/5 border border-white/10 rounded-xl p-6 mb-6">
+                        <h3 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
+                            <Github className="w-5 h-5 text-purple-400" />
+                            Add GitHub Repository
+                        </h3>
+                        <p className="text-purple-200/50 text-sm mb-4">
+                            Index a public GitHub repository&apos;s code and documentation into the knowledge base.
+                        </p>
+
+                        <div className="flex gap-3">
+                            <input
+                                type="text"
+                                value={repoUrl}
+                                onChange={(e) => setRepoUrl(e.target.value)}
+                                placeholder="https://github.com/owner/repo"
+                                disabled={ingesting}
+                                className="flex-1 px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-purple-300/30 focus:outline-none focus:ring-2 focus:ring-purple-400/50 transition-all disabled:opacity-50"
+                                id="github-repo-input"
+                                onKeyDown={(e) => { if (e.key === 'Enter') handleIngestGitHub() }}
+                            />
+                            <button
+                                onClick={handleIngestGitHub}
+                                disabled={ingesting || !repoUrl.trim()}
+                                className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 disabled:from-gray-600 disabled:to-gray-600 text-white font-medium rounded-lg transition-all text-sm shadow-lg shadow-purple-500/20 whitespace-nowrap"
+                                id="ingest-github-btn"
+                            >
+                                {ingesting ? (
+                                    <>
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        Indexing...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Github className="w-4 h-4" />
+                                        Add Repo
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* ──── Scrape LoginRadius Docs (admin only) ──── */}
+                {!readOnly && (
+                    <div className="bg-white/5 border border-white/10 rounded-xl p-6 mb-6">
+                        <h3 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
+                            <Globe className="w-5 h-5 text-purple-400" />
+                            Scrape LoginRadius Docs
+                        </h3>
+                        <p className="text-purple-200/50 text-sm mb-4">
+                            Automatically crawl and index the LoginRadius documentation website.
+                        </p>
+
+                        <button
+                            onClick={handleScrape}
+                            disabled={scraping}
+                            className="flex items-center gap-2 px-5 py-2.5 bg-white/10 border border-white/20 text-white font-medium rounded-lg text-sm hover:bg-white/15 disabled:opacity-50 transition-colors"
+                            id="scrape-docs-btn"
+                        >
+                            {scraping ? (
                                 <>
                                     <Loader2 className="w-4 h-4 animate-spin" />
-                                    Indexing...
+                                    Scraping...
                                 </>
                             ) : (
                                 <>
-                                    <Github className="w-4 h-4" />
-                                    Add Repo
+                                    <Globe className="w-4 h-4" />
+                                    Start Scraping
                                 </>
                             )}
                         </button>
                     </div>
-                </div>
-
-                {/* ──── Scrape LoginRadius Docs ──── */}
-                <div className="bg-white/5 border border-white/10 rounded-xl p-6 mb-6">
-                    <h3 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
-                        <Globe className="w-5 h-5 text-purple-400" />
-                        Scrape LoginRadius Docs
-                    </h3>
-                    <p className="text-purple-200/50 text-sm mb-4">
-                        Automatically crawl and index the LoginRadius documentation website.
-                    </p>
-
-                    <button
-                        onClick={handleScrape}
-                        disabled={scraping}
-                        className="flex items-center gap-2 px-5 py-2.5 bg-white/10 border border-white/20 text-white font-medium rounded-lg text-sm hover:bg-white/15 disabled:opacity-50 transition-colors"
-                        id="scrape-docs-btn"
-                    >
-                        {scraping ? (
-                            <>
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                                Scraping...
-                            </>
-                        ) : (
-                            <>
-                                <Globe className="w-4 h-4" />
-                                Start Scraping
-                            </>
-                        )}
-                    </button>
-                </div>
+                )}
 
                 {/* ──── Resource List ──── */}
                 <div className="bg-white/5 border border-white/10 rounded-xl p-6">
@@ -428,7 +604,9 @@ function DocumentsPanel() {
                         <div className="text-center py-8">
                             <FolderOpen className="w-10 h-10 text-purple-300/20 mx-auto mb-3" />
                             <p className="text-purple-200/40 text-sm">No resources uploaded yet</p>
-                            <p className="text-purple-200/20 text-xs mt-1">Upload a PDF or add a GitHub repo to get started</p>
+                            {!readOnly && (
+                                <p className="text-purple-200/20 text-xs mt-1">Upload a PDF or add a GitHub repo to get started</p>
+                            )}
                         </div>
                     ) : (
                         <div className="space-y-3">
@@ -470,13 +648,15 @@ function DocumentsPanel() {
                                         )}
                                     </div>
 
-                                    <button
-                                        onClick={() => handleDeleteResource(r.id)}
-                                        className="p-2 text-purple-200/30 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all rounded-lg hover:bg-red-500/10"
-                                        title="Delete resource"
-                                    >
-                                        <Trash2 className="w-4 h-4" />
-                                    </button>
+                                    {!readOnly && (
+                                        <button
+                                            onClick={() => handleDeleteResource(r.id)}
+                                            className="p-2 text-purple-200/30 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all rounded-lg hover:bg-red-500/10"
+                                            title="Delete resource"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -495,6 +675,7 @@ function UsersPanel() {
     const [result, setResult] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [setupDone, setSetupDone] = useState(false)
+    const perms = usePagePermissions()
 
     const handleAssignRole = async () => {
         if (!uid.trim()) return
@@ -527,33 +708,35 @@ function UsersPanel() {
                 <h2 className="text-2xl font-bold text-white mb-2">User Management</h2>
                 <p className="text-purple-200/50 text-sm mb-8">Assign roles to users via LoginRadius</p>
 
-                {/* Setup roles (one-time) */}
-                <div className="bg-white/5 border border-white/10 rounded-xl p-6 mb-6">
-                    <h3 className="text-base font-semibold text-white mb-2 flex items-center gap-2">
-                        <Settings className="w-4 h-4 text-purple-300" />
-                        Initial Role Setup
-                    </h3>
-                    <p className="text-purple-200/50 text-sm mb-4">
-                        Create the three roles (administrator, user, observer) in your LoginRadius app. Only needs to be done once.
-                    </p>
-                    <button
-                        onClick={handleSetupRoles}
-                        disabled={setupDone}
-                        className="flex items-center gap-2 px-4 py-2 bg-white/10 border border-white/20 text-white rounded-lg text-sm font-medium hover:bg-white/15 disabled:opacity-50 transition-colors"
-                    >
-                        {setupDone ? (
-                            <>
-                                <CheckCircle className="w-4 h-4 text-green-400" />
-                                Roles Created
-                            </>
-                        ) : (
-                            <>
-                                <Settings className="w-4 h-4" />
-                                Setup Roles
-                            </>
-                        )}
-                    </button>
-                </div>
+                {/* Setup roles (one-time, tenant admin only) */}
+                {perms.isTenantAdmin && (
+                    <div className="bg-white/5 border border-white/10 rounded-xl p-6 mb-6">
+                        <h3 className="text-base font-semibold text-white mb-2 flex items-center gap-2">
+                            <Settings className="w-4 h-4 text-purple-300" />
+                            Initial Role Setup
+                        </h3>
+                        <p className="text-purple-200/50 text-sm mb-4">
+                            Create the three roles (administrator, user, observer) in your LoginRadius app. Only needs to be done once.
+                        </p>
+                        <button
+                            onClick={handleSetupRoles}
+                            disabled={setupDone}
+                            className="flex items-center gap-2 px-4 py-2 bg-white/10 border border-white/20 text-white rounded-lg text-sm font-medium hover:bg-white/15 disabled:opacity-50 transition-colors"
+                        >
+                            {setupDone ? (
+                                <>
+                                    <CheckCircle className="w-4 h-4 text-green-400" />
+                                    Roles Created
+                                </>
+                            ) : (
+                                <>
+                                    <Settings className="w-4 h-4" />
+                                    Setup Roles
+                                </>
+                            )}
+                        </button>
+                    </div>
+                )}
 
                 {/* Assign role */}
                 <div className="bg-white/5 border border-white/10 rounded-xl p-6">
@@ -768,7 +951,7 @@ function OrganizationsPanel() {
 
 export default function AdminDashboard() {
     return (
-        <RouteGuard allowedRoles={['administrator']}>
+        <RouteGuard allowedRoles={['administrator', 'user', 'observer']}>
             <AdminPage />
         </RouteGuard>
     )
