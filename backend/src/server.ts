@@ -10,7 +10,7 @@ const app = createApp();
 
 const PORT = config.app.port;
 
-const server = app.listen(PORT, async () => {
+const server = app.listen(PORT, () => {
   logger.info(`
     ╔═══════════════════════════════════════════╗
     ║   LoginRadius Chatbot Backend Server      ║
@@ -22,19 +22,22 @@ const server = app.listen(PORT, async () => {
   logger.info(`LLM: HuggingFace (${config.huggingface.model})`);
   logger.info(`Database: ${config.database.url.split('@')[1] || 'configured'}`);
 
-  try {
-    // Initialize Database Services
-    await userService.initialize();
-    await sessionService.initialize();
-    await resourceService.initialize();
+  // Initialize services in background (non-blocking for serverless cold starts)
+  (async () => {
+    try {
+      await userService.initialize();
+      await sessionService.initialize();
+      await resourceService.initialize();
+      logger.info('Database services initialized successfully');
 
-    // Warm up and test RAG pipeline
-    await ragPipelineService.warmUp();
-
-    logger.info('Database services initialized successfully');
-  } catch (error) {
-    logger.error('Database initialization failed', { error: String(error) });
-  }
+      // Warm up RAG pipeline in background (don't block server startup)
+      ragPipelineService.warmUp().catch(err => {
+        logger.warn('RAG warmup failed (non-fatal)', { error: String(err) });
+      });
+    } catch (error) {
+      logger.error('Database initialization failed', { error: String(error) });
+    }
+  })();
 });
 
 // Graceful shutdown
